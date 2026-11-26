@@ -14,11 +14,28 @@ if SERVER then
 		Engine.ACEBatteryChargingInstalled = true
 
 		local BatteryLinkDistance = 512
+		local StarterEnergy = 0.05 -- kWh used for each petrol/diesel engine start
+
+		local function IsCombustionEngine( Entity )
+			return Entity.EngineType == "GenericPetrol" or Entity.EngineType == "GenericDiesel"
+		end
 
 		local function FindFuelTank( Entity )
 			for _, Tank in ipairs( Entity.FuelLink or {} ) do
 				if IsValid( Tank ) and Tank.Active and Tank.Legal and Tank.Fuel > 0 and Tank.FuelType ~= "Electric" then
 					return Tank
+				end
+			end
+		end
+
+		local function FindStarterBattery( Entity )
+			for _, Battery in ipairs( Entity.BatteryLink or {} ) do
+				if IsValid( Battery )
+					and Battery.FuelType == "Electric"
+					and Battery.Active
+					and Battery.Legal
+					and Battery.Fuel >= StarterEnergy then
+					return Battery
 				end
 			end
 		end
@@ -70,7 +87,7 @@ if SERVER then
 			Target.Master = Target.Master or {}
 			table.insert( Target.Master, self )
 
-			return true, "Battery linked for charging."
+			return true, "Battery linked for charging and engine starting."
 		end
 
 		--- Unlinks an electric ACE battery from an engine charger.
@@ -92,7 +109,7 @@ if SERVER then
 		--- Charges linked electric batteries from a running, fueled petrol or diesel engine.
 		-- @param DeltaTime number Time in seconds since the engine's previous calculation.
 		function Engine:ChargeBatteries( DeltaTime )
-			if not self.Active or not self.Legal or self.FuelType == "Electric" then return 0 end
+			if not self.Active or not self.Legal or not IsCombustionEngine( self ) then return 0 end
 
 			local FuelTank = FindFuelTank( self )
 			local Efficiency = ACE.Efficiency[self.EngineType]
@@ -121,7 +138,7 @@ if SERVER then
 
 			local Power = math.max( self.Torque or 0, 0 ) * math.max( self.FlyRPM or 0, 0 ) / 9548.8
 			local MechanicalEnergy = Power * DeltaTime / 3600
-		local ChargeEnergy = math.min( BatteryRoom, MechanicalEnergy * GeneratorEfficiency )
+			local ChargeEnergy = math.min( BatteryRoom, MechanicalEnergy * GeneratorEfficiency )
 
 			if ChargeEnergy <= 0 then return 0 end
 
@@ -178,6 +195,44 @@ if SERVER then
 			end
 		end
 
+		local OriginalTriggerInput = Engine.TriggerInput
+		if OriginalTriggerInput then
+			Engine.TriggerInput = function( self, InputName, Value, ... )
+				local IsStarting = InputName == "Active" and Value > 0 and not self.Active
+				local StarterBattery
+
+				if IsStarting and IsCombustionEngine( self ) then
+					StarterBattery = FindStarterBattery( self )
+
+					if not StarterBattery then
+						self.OTWarnings = self.OTWarnings or {}
+
+						if not self.OTWarnings.WarnedStarterBattery then
+							local Owner = self:CPPIGetOwner()
+							if IsValid( Owner ) then
+								ACE_ChatMessagePly( Owner, "[ACE] Your petrol/diesel engine requires a linked, active battery with at least " .. StarterEnergy .. " kWh to start.", Color( 255, 0, 0 ) )
+							end
+							self.OTWarnings.WarnedStarterBattery = true
+						end
+
+						return
+					end
+				end
+
+				local Result = OriginalTriggerInput( self, InputName, Value, ... )
+
+				-- The original input handler may reject starting because fuel or a driver
+				-- is missing. Only consume starter charge if it actually activated.
+				if IsStarting and StarterBattery and self.Active and IsValid( StarterBattery ) then
+					StarterBattery.Fuel = math.max( StarterBattery.Fuel - StarterEnergy, 0 )
+					Wire_TriggerOutput( StarterBattery, "Fuel", StarterBattery.Fuel )
+					StarterBattery:UpdateFuelMass()
+				end
+
+				return Result
+			end
+		end
+
 		local OriginalCalcRPM = Engine.CalcRPM
 		if OriginalCalcRPM then
 			Engine.CalcRPM = function( self, ... )
@@ -187,10 +242,8 @@ if SERVER then
 				local Result = OriginalCalcRPM( self, ... )
 				local FuelUsed = self:ChargeBatteries( DeltaTime )
 
-				if FuelUsed > 0 then
-					if IsValid( FuelTank ) then
-						Wire_TriggerOutput( self, "Fuel Use", math.Round( 60 * (FuelBefore - FuelTank.Fuel) / math.max( DeltaTime, 0.000001 ), 3 ) )
-					end
+				if FuelUsed > 0 and IsValid( FuelTank ) then
+					Wire_TriggerOutput( self, "Fuel Use", math.Round( 60 * (FuelBefore - FuelTank.Fuel) / math.max( DeltaTime, 0.000001 ), 3 ) )
 				end
 
 				return Result
