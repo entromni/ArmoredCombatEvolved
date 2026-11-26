@@ -103,10 +103,18 @@ local function StartBatteryCookoff( self, Inflictor )
 	if self.CookingOff or self.CookoffFinished then return end
 
 	self.CookingOff = true
+	self.CookoffSpent = true -- permanent charge/recharge lockout after thermal runaway
 	self.Exploding = true
 	self.CookoffDrainRate = math.max( self.Capacity / 12, 0.1 )
 	self.CookoffLastThink = CurTime()
 	self.NextCookoffEffect = 0
+	self.NextCookoffDamage = 0
+	self.CookoffDamageRadius = math.max( math.sqrt( self.ACF.Area or 0 ) * 2, 100 )
+
+	if not self.CookoffSound then
+		self.CookoffSound = CreateSound( self, "ambient/fire/fire_small_loop1.wav" )
+		if self.CookoffSound then self.CookoffSound:PlayEx( 0.9, math.random( 90, 105 ) ) end
+	end
 
 	if IsValid( Inflictor ) and Inflictor:IsPlayer() then
 		self.Inflictor = Inflictor
@@ -332,7 +340,8 @@ function ENT:UpdateFuelTank(_, _, Data2)
 	if self.FuelType == "Electric" then
 		self.Liters   = self.Capacity --batteries capacity is different from internal volume
 		self.Capacity = self.Capacity * ACE.LiIonED
-		self.Fuel     = pct * self.Capacity
+		self.OriginalCapacity = self.Capacity -- rated charge used as the battery's reference capacity
+		self.Fuel     = self.CookoffSpent and 0 or pct * self.Capacity
 	else
 		self.Fuel	= pct * self.Capacity
 	end
@@ -465,7 +474,30 @@ function ENT:Think()
 			Effect:SetNormal( Vector( 0, 0, 1 ) )
 			Effect:SetScale( 1 )
 			util.Effect( "ace_battery_cookoff", Effect, true, true )
-			self.NextCookoffEffect = Now + 0.15
+			self.NextCookoffEffect = Now + 0.1
+		end
+
+		-- The hot plume damages nearby physics props while the battery burns.
+		if Now >= ( self.NextCookoffDamage or 0 ) then
+			local Radius = self.CookoffDamageRadius or 100
+			local Attacker = IsValid( self.Inflictor ) and self.Inflictor or self
+			for _, Target in ipairs( ents.FindInSphere( self:GetPos(), Radius ) ) do
+				if Target ~= self and IsValid( Target ) and not Target:IsWorld() and not Target:IsPlayer() and not Target:IsNPC() then
+					local Phys = Target:GetPhysicsObject()
+					if IsValid( Phys ) then
+						local Distance = self:GetPos():Distance( Target:WorldSpaceCenter() )
+					local Falloff = 1 - math.Clamp( Distance / Radius, 0, 1 )
+					local Info = DamageInfo()
+					Info:SetDamage( 12 * Falloff )
+					Info:SetDamageType( DMG_BURN )
+					Info:SetAttacker( Attacker )
+					Info:SetInflictor( self )
+					Info:SetDamagePosition( Target:WorldSpaceCenter() )
+					Target:TakeDamageInfo( Info )
+					end
+				end
+			end
+			self.NextCookoffDamage = Now + 0.25
 		end
 
 		self:UpdateFuelMass()
@@ -476,7 +508,9 @@ function ENT:Think()
 		if self.Fuel <= 0 then
 			self.CookingOff = false
 			self.CookoffFinished = true
+			self.CookoffSpent = true
 			self.CookoffDrainRate = nil
+			if self.CookoffSound then self.CookoffSound:Stop() self.CookoffSound = nil end
 			self:UpdateOverlayText()
 			return false
 		end
@@ -509,11 +543,11 @@ function ENT:Think()
 	end
 
 	--refuelling
-	if self.Active and self.SupplyFuel and self.Fuel > 0 and self.Legal then
+	if self.Active and self.SupplyFuel and self.Fuel > 0 and self.Legal and not self.CookoffSpent then
 		self:NextThink(CurTime())
 		for _,Tank in pairs(ACE.FuelTanks) do
 
-			if self.FuelType == Tank.FuelType and not Tank.SupplyFuel and Tank.Legal then --don't refuel the refuellers, otherwise it'll be one big circlejerk
+			if self.FuelType == Tank.FuelType and not Tank.SupplyFuel and Tank.Legal and not Tank.CookoffSpent and not Tank.CookingOff then --don't refuel the refuellers, otherwise it'll be one big circlejerk
 				local dist = self:GetPos():Distance(Tank:GetPos())
 
 				if dist < ACE.RefillDistance and (Tank.Capacity - Tank.Fuel > 0.1) then
@@ -550,6 +584,8 @@ function ENT:Think()
 end
 
 function ENT:OnRemove()
+
+	if self.CookoffSound then self.CookoffSound:Stop() self.CookoffSound = nil end
 
 	for Key in pairs(self.Master) do
 		if IsValid( self.Master[Key] ) then
