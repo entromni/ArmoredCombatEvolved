@@ -396,8 +396,8 @@ function ENT:UpdateOverlayText()
 
 	if self.CookingOff then
 		text = text .. "\n\nBATTERY THERMAL RUNAWAY"
-	elseif self.CookoffFinished then
-		text = text .. "\n\nBattery charge depleted"
+	elseif self.CookoffSpent then
+		text = text .. "\n\nBattery permanently depleted - cannot recharge"
 	end
 
 	if not self.Legal then
