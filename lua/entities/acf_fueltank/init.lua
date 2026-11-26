@@ -8,6 +8,11 @@ include("shared.lua")
 
 local TankTable = ACE.Weapons.FuelTanksSize
 
+-- A battery that falls below 1% of its original rated charge is considered
+-- irreversibly depleted. This is a named fraction of original capacity, not
+-- a fixed kWh value, so it scales with every battery size.
+local BATTERY_RECHARGE_CUTOFF_FRACTION = 0.01
+
 do
 
 	local FueltankWireDescs = {
@@ -462,6 +467,16 @@ end
 
 function ENT:Think()
 
+	if self.FuelType == "Electric" and not self.CookoffSpent then
+		local OriginalCapacity = self.OriginalCapacity or self.Capacity
+		local Cutoff = OriginalCapacity * BATTERY_RECHARGE_CUTOFF_FRACTION
+		if self.Fuel <= Cutoff then
+			self.CookoffSpent = true
+			self.Fuel = 0
+			self:UpdateOverlayText()
+		end
+	end
+
 	if self.CookingOff then
 		local Now = CurTime()
 		local Delta = math.max( Now - ( self.CookoffLastThink or Now ), 0 )
@@ -547,7 +562,12 @@ function ENT:Think()
 		self:NextThink(CurTime())
 		for _,Tank in pairs(ACE.FuelTanks) do
 
-			if self.FuelType == Tank.FuelType and not Tank.SupplyFuel and Tank.Legal and not Tank.CookoffSpent and not Tank.CookingOff then --don't refuel the refuellers, otherwise it'll be one big circlejerk
+			if self.FuelType == Tank.FuelType and not Tank.SupplyFuel and Tank.Legal and not Tank.CookoffSpent and not Tank.CookingOff then
+				if Tank.FuelType == "Electric" and Tank.Fuel <= ( Tank.OriginalCapacity or Tank.Capacity ) * BATTERY_RECHARGE_CUTOFF_FRACTION then
+					Tank.CookoffSpent = true
+					Tank.Fuel = 0
+				end
+				if not Tank.CookoffSpent then --don't refuel the refuellers, otherwise it'll be one big circlejerk
 				local dist = self:GetPos():Distance(Tank:GetPos())
 
 				if dist < ACE.RefillDistance and (Tank.Capacity - Tank.Fuel > 0.1) then
@@ -568,6 +588,7 @@ function ENT:Think()
 							Tank.NextSoundTime = CurTime() + 1 -- Adjust the delay time (in seconds) as needed
 						end
 					end
+				end
 				end
 			end
 		end
