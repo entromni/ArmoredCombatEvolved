@@ -118,6 +118,7 @@ local function StartBatteryCookoff( self, Inflictor )
 
 	if not self.CookoffSoundStarted then
 		-- This is a looped Source fire ambience; EmitSound broadcasts it to clients.
+		self:EmitSound( "ambient/fire/ignite.wav", 90, math.random( 90, 105 ), 1 )
 		self:EmitSound( "ambient/fire/fire_small_loop1.wav", 85, math.random( 90, 105 ), 0.9 )
 		self.CookoffSoundStarted = true
 	end
