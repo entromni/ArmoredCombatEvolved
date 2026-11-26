@@ -99,7 +99,25 @@ function ENT:ACF_Activate( Recalc )
 
 end
 
-function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )	--This function needs to return HitRes
+local function StartBatteryCookoff( self, Inflictor )
+	if self.CookingOff or self.CookoffFinished then return end
+
+	self.CookingOff = true
+	self.Exploding = true
+	self.CookoffDrainRate = math.max( self.Capacity / 12, 0.1 )
+	self.CookoffLastThink = CurTime()
+	self.NextCookoffEffect = 0
+
+	if IsValid( Inflictor ) and Inflictor:IsPlayer() then
+		self.Inflictor = Inflictor
+	end
+
+	-- Preserve the entity through cookoff; ACF must not remove it as a killed prop.
+	self.ACF.Health = math.max( self.ACF.Health or 0, 1 )
+	self:NextThink( CurTime() )
+end
+
+function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )
 
 	local Mul = (((Type == "HEAT" or Type == "THEAT" or Type == "HEATFS" or Type == "THEATFS") and ACE.HEATMulFuel) or 1) --Heat penetrators deal bonus damage to fuel
 	local HitRes = ACE_PropDamage( Entity, Energy, FrArea * Mul, Angle, Inflictor ) --Calling the standard damage prop function
@@ -108,17 +126,17 @@ function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )	-
 	if self.Exploding or NoExplode or not self.IsExplosive then return HitRes end
 
 	if HitRes.Kill then
+		if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
 
-	if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
-
-		self.Exploding = true
-
-		if IsValid(Inflictor) and Inflictor:IsPlayer() then
-			self.Inflictor = Inflictor
+		if self.FuelType == "Electric" then
+			StartBatteryCookoff( self, Inflictor )
+			HitRes.Kill = false
+			return HitRes
 		end
 
-		ACE_ScaledExplosion( self , true )
-
+		self.Exploding = true
+		if IsValid( Inflictor ) and Inflictor:IsPlayer() then self.Inflictor = Inflictor end
+		ACE_ScaledExplosion( self, true )
 		return HitRes
 	end
 
@@ -127,18 +145,18 @@ function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )	-
 
 	--it's gonna blow
 	if math.Rand(0, 1.2) < (ExplodeChance + Ratio) then
+		if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
 
-	if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
+		if self.FuelType == "Electric" then
+			StartBatteryCookoff( self, Inflictor )
+			return HitRes
+		end
 
 		self.Inflictor = Inflictor
 		self.Exploding = true
-
-		timer.Simple(math.Rand(0.1, 1), function()
-			if IsValid(self) then
-				ACE_ScaledExplosion( self , true )
-			end
+		timer.Simple( math.Rand( 0.1, 1 ), function()
+			if IsValid( self ) then ACE_ScaledExplosion( self, true ) end
 		end )
-
 	else												--spray some fuel around
 		self:NextThink( CurTime() + 0.1 )
 		if self.FuelType ~= "Electric" then
@@ -362,6 +380,12 @@ function ENT:UpdateOverlayText()
 		end
 	end
 
+	if self.CookingOff then
+		text = text .. "\n\nBATTERY THERMAL RUNAWAY"
+	elseif self.CookoffFinished then
+		text = text .. "\n\nBattery charge depleted"
+	end
+
 	if not self.Legal then
 		text = text .. "\nNot legal, disabled for " .. math.ceil(self.NextLegalCheck - ACE.CurTime) .. "s\nIssues: " .. self.LegalIssues
 	end
@@ -428,6 +452,38 @@ function ENT:TriggerInput( iname, value )
 end
 
 function ENT:Think()
+
+	if self.CookingOff then
+		local Now = CurTime()
+		local Delta = math.max( Now - ( self.CookoffLastThink or Now ), 0 )
+		self.CookoffLastThink = Now
+		self.Fuel = math.max( self.Fuel - ( self.CookoffDrainRate or 0 ) * Delta, 0 )
+
+		if Now >= ( self.NextCookoffEffect or 0 ) then
+			local Effect = EffectData()
+			Effect:SetOrigin( self:GetPos() )
+			Effect:SetNormal( Vector( 0, 0, 1 ) )
+			Effect:SetScale( 1 )
+			util.Effect( "ace_battery_cookoff", Effect, true, true )
+			self.NextCookoffEffect = Now + 0.15
+		end
+
+		self:UpdateFuelMass()
+		self:UpdateOverlayText()
+		Wire_TriggerOutput( self, "Fuel", self.Fuel )
+		Wire_TriggerOutput( self, "Leaking", 0 )
+
+		if self.Fuel <= 0 then
+			self.CookingOff = false
+			self.CookoffFinished = true
+			self.CookoffDrainRate = nil
+			self:UpdateOverlayText()
+			return false
+		end
+
+		self:NextThink( Now + 0.1 )
+		return true
+	end
 
 	if not ACE_IsDefaultActiveInputWired(self) then
 		self.Active = ACE_GetDefaultActiveInputState(self)
