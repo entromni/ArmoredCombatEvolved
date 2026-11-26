@@ -607,7 +607,7 @@ end
 
 function ENT:OnRemove()
 
-	if self.CookoffSound then self.CookoffSound:Stop() self.CookoffSound = nil end
+	if self.CookoffSoundStarted then self:StopSound( "ambient/fire/fire_small_loop1.wav" ) self.CookoffSoundStarted = nil end
 
 	for Key in pairs(self.Master) do
 		if IsValid( self.Master[Key] ) then
