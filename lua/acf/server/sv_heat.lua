@@ -5,10 +5,10 @@
 
 
 ------Ambient Temperature. Engine Heat will not be lower than this. In Celcius.
-	ACE.AmbientTemp = 20
+ACE.AmbientTemp = 20
 
 ------How much the distance affects Heat detection for IR seeker? Higher => Less Heat detected at distant targets - Def: 1
-	ACE.HeatDistanceLoss = 0.5
+ACE.HeatDistanceLoss = 0.5
 
 ----------------------------------------------------------------------------------------/
 ----------------------------------------------------------------------------------------/
@@ -46,8 +46,8 @@ function ACE_InfraredHeatFromProp( Target, dist )
 	if not GroundTr.Hit then Heat = Heat + 150 end --Add 150C if the target is above the ground
 
 	--A tank going 60mph will generate 30 extra heat plus engine heat
-	--An aircraft going 200 mph will generate 100 heat plus 150
-	--An aircraft going 300 mph will generate 150 heat plus 150
+	--An aircraft going 200 mph will generate 100 extra heat plus 150
+	--An aircraft going 300 mph will generate 150 extra heat plus 150
 
 	return Heat
 end
@@ -129,7 +129,7 @@ function ACE_HeatFromEngine( Engine )
 
 		--Electric engines are more efficient, so they will make less heat than oil based engines
 		elseif Engine.FuelType == "Electric" then
-			--print("Electric Engine")
+			--print("Electric engines")
 			Heat = RPM / 60000
 			ExTemp = 5
 
@@ -280,3 +280,41 @@ function ACE_HeatFromEngine( Engine , Radiator )  --radiator?!? woooo
 end
 ]]--
 
+ACE.OverheatDamageRate = ACE.OverheatDamageRate or 0.005
+ACE.OverheatDamageInterval = ACE.OverheatDamageInterval or 0.5
+
+local function ApplyGunOverheatDamage(Gun, DeltaTime)
+	if not IsValid(Gun) or not Gun.ACF or not Gun.ACF.Health or not Gun.ACF.MaxHealth then return end
+
+	local OverheatRatio = math.max((Gun.Heat or ACE.AmbientTemp) / 200 - 1, 0)
+	if OverheatRatio <= 0 then return end
+
+	local Damage = Gun.ACF.MaxHealth * ACE.OverheatDamageRate * OverheatRatio * DeltaTime
+	Gun.ACF.Health = math.max(Gun.ACF.Health - Damage, 0)
+	Gun.ACF.Armour = Gun.ACF.MaxArmour * (0.5 + Gun.ACF.Health / Gun.ACF.MaxHealth / 2)
+	Gun.ACF.PrHealth = Gun.ACF.Health
+
+	if ACE_UpdateVisualHealth then
+		ACE_UpdateVisualHealth(Gun)
+	end
+
+	if Gun.ACF.Health <= 0 then
+		ACE_APKill(Gun, VectorRand(), 0)
+	end
+end
+
+timer.Create("ACE_GunOverheatDamage", ACE.OverheatDamageInterval, 0, function()
+	local Now = CurTime()
+
+	for _, Gun in ipairs(ents.FindByClass("acf_gun")) do
+		if not Gun.IsOverheated then
+			Gun.ACEOverheatLastDamage = nil
+			continue
+		end
+
+		local LastDamage = Gun.ACEOverheatLastDamage or Now
+		Gun.ACEOverheatLastDamage = Now
+
+		ApplyGunOverheatDamage(Gun, math.min(Now - LastDamage, 1))
+	end
+end)
