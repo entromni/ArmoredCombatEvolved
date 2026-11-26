@@ -116,9 +116,10 @@ local function StartBatteryCookoff( self, Inflictor )
 	self.NextCookoffDamage = 0
 	self.CookoffDamageRadius = math.max( math.sqrt( self.ACF.Area or 0 ) * 2, 100 )
 
-	if not self.CookoffSound then
-		self.CookoffSound = CreateSound( self, "ambient/fire/fire_small_loop1.wav" )
-		if self.CookoffSound then self.CookoffSound:PlayEx( 0.9, math.random( 90, 105 ) ) end
+	if not self.CookoffSoundStarted then
+		-- This is a looped Source fire ambience; EmitSound broadcasts it to clients.
+		self:EmitSound( "ambient/fire/fire_small_loop1.wav", 85, math.random( 90, 105 ), 0.9 )
+		self.CookoffSoundStarted = true
 	end
 
 	if IsValid( Inflictor ) and Inflictor:IsPlayer() then
@@ -525,7 +526,7 @@ function ENT:Think()
 			self.CookoffFinished = true
 			self.CookoffSpent = true
 			self.CookoffDrainRate = nil
-			if self.CookoffSound then self.CookoffSound:Stop() self.CookoffSound = nil end
+			if self.CookoffSoundStarted then self:StopSound( "ambient/fire/fire_small_loop1.wav" ) self.CookoffSoundStarted = nil end
 			self:UpdateOverlayText()
 			return false
 		end
