@@ -256,7 +256,8 @@ do
 		Gun:SetPos(Pos)
 		Gun:Spawn()
 		Gun:CPPISetOwner(Owner)
-		Gun.Id              = Id
+		Gun.Id               = Lookup.ACE_CustomPreset and CustomBaseID or Id
+		Gun.ACE_CustomGunID   = Lookup.ACE_CustomPreset and Id or nil
 		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or nil
 		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or nil
 		Gun.ACE_CustomSubclass = Subclass
@@ -334,6 +335,7 @@ do
 		Gun:SetNWString( "WireName", Lookup.name )
 		Gun:SetNWString( "Class", Gun.Class )
 		Gun:SetNWString( "ID", Gun.Id )
+		Gun:SetNWString( "ACE_CustomGunID", Gun.ACE_CustomGunID or "" )
 		Gun:SetNWString( "ACE_CustomBaseID", Gun.ACE_CustomBaseID or "" )
 		Gun:SetNWFloat( "ACE_CustomCaliber", Gun.ACE_CustomCaliber or 0 )
 		Gun:SetNWString( "ACE_CustomSubclass", Gun.ACE_CustomSubclass or "Standard" )
