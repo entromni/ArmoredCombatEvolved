@@ -374,42 +374,52 @@ function ENT:Update( ArgsTable )
 			end
 		end
 
-		-- Read model attachment offsets immediately after changing the model,
-		-- before PhysicsInit replaces the physics object. On some restored or
-		-- parented gearboxes, querying attachments after PhysicsInit returns
-		-- stale bone transforms and can falsely report invalid attachment data.
-		local function ReadModelAttachments(Scale)
+		-- Read attachment offsets on a temporary model at the world origin.
+		-- GetAttachment returns world coordinates; on entities far from the
+		-- origin, a stale attachment matrix can resolve to (0, 0, 0), which
+		-- then looks like an invalid enormous local offset. A temporary model
+		-- near the origin avoids depending on the resized entity's transform.
+		local function ReadModelAttachments(Model, Scale)
+			local Probe = ents.Create("prop_dynamic")
+			if not IsValid(Probe) then return {} end
+
+			Probe:SetModel(Model)
+			Probe:SetPos(vector_origin)
+			Probe:SetAngles(angle_zero)
+			Probe:SetNoDraw(true)
+			Probe:SetNotSolid(true)
+			Probe:Spawn()
+			Probe:Activate()
+
 			local function ReadAttachment(Name)
-				local AttachmentID = self:LookupAttachment(Name)
+				local AttachmentID = Probe:LookupAttachment(Name)
 				if not AttachmentID or AttachmentID <= 0 then return nil end
 
-				local Attachment = self:GetAttachment(AttachmentID)
+				local Attachment = Probe:GetAttachment(AttachmentID)
 				if not Attachment or not isvector(Attachment.Pos) then return nil end
 
-				-- Entity:WorldToLocal can produce a bad offset for restored,
-				-- parented entities whose world transform is far from the map
-				-- origin. Convert the world-space attachment using the entity's
-				-- explicit world origin and world angle instead.
-				local LocalPos = Attachment.Pos - self:GetPos()
-				LocalPos:Rotate(-self:GetAngles())
+				local LocalPos = Attachment.Pos - Probe:GetPos()
+				LocalPos:Rotate(-Probe:GetAngles())
 
-				local Mins, Maxs = self:GetModelBounds()
+				local Mins, Maxs = Probe:GetModelBounds()
 				local Radius = math.max(Mins:Length(), Maxs:Length()) + 32
 				if not isvector(LocalPos) or LocalPos:Length() > Radius then return nil end
 
 				return LocalPos * Scale
 			end
 
-			return {
+			local Attachments = {
 				In = ReadAttachment("input"),
 				OutL = ReadAttachment("driveshaftL"),
 				OutR = ReadAttachment("driveshaftR"),
 			}
-		end
 
+			Probe:Remove()
+			return Attachments
+		end
 		local function BuildCollision(Model, Scale)
 			self:SetModel(Model)
-			local Attachments = ReadModelAttachments(Scale)
+			local Attachments = ReadModelAttachments(Model, Scale)
 
 			local Success
 			if Scale == 1 then
