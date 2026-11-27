@@ -622,8 +622,18 @@ function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, Owne
 		local Parent = Ent:GetParent()
 		if not IsValid( Parent ) then return Ent, LocalPos end
 
+		-- Resolve to the highest valid parent, not just the immediate one.
+		-- Dupes from older builds can have nested parenting; attaching the
+		-- keyframe rope to an intermediate parent can leave it at its paste
+		-- transform when that parent's own parent is restored/moved.
 		local WorldPos = Ent:LocalToWorld( LocalPos )
-		return Parent, Parent:WorldToLocal( WorldPos )
+		local Root = Parent
+
+		while IsValid( Root:GetParent() ) do
+			Root = Root:GetParent()
+		end
+
+		return Root, Root:WorldToLocal( WorldPos )
 	end
 
 	if not ExactEndpoints then
