@@ -15,6 +15,24 @@ if SERVER then
 
 		local BatteryLinkDistance = 512
 		local StarterEnergy = 0.05 -- kWh used for each petrol/diesel engine start
+		local BatteryEndOfLifeFraction = 0.01 -- permanently spent below 1% of rated charge
+
+		local function IsBatterySpent( Battery )
+			if not IsValid( Battery ) or Battery.FuelType ~= "Electric" then return true end
+			if Battery.CookoffSpent then return true end
+
+			local RatedCapacity = Battery.OriginalCapacity or Battery.Capacity or 0
+			if RatedCapacity > 0 and Battery.Fuel <= RatedCapacity * BatteryEndOfLifeFraction then
+				Battery.Fuel = 0
+				Battery.CookoffSpent = true
+				if Battery.UpdateOverlayText then Battery:UpdateOverlayText() end
+				if Battery.UpdateFuelMass then Battery:UpdateFuelMass() end
+				Wire_TriggerOutput( Battery, "Fuel", 0 )
+				return true
+			end
+
+			return false
+		end
 
 		local function IsCombustionEngine( Entity )
 			return Entity.EngineType == "GenericPetrol" or Entity.EngineType == "GenericDiesel"
@@ -34,6 +52,7 @@ if SERVER then
 					and Battery.FuelType == "Electric"
 					and Battery.Active
 					and Battery.Legal
+					and not IsBatterySpent( Battery )
 					and Battery.Fuel >= StarterEnergy then
 					return Battery
 				end
@@ -129,7 +148,7 @@ if SERVER then
 					continue
 				end
 
-				if Battery.FuelType == "Electric" and Battery.Active and Battery.Legal then
+				if Battery.FuelType == "Electric" and Battery.Active and Battery.Legal and not IsBatterySpent( Battery ) then
 					BatteryRoom = BatteryRoom + math.max( Battery.Capacity - Battery.Fuel, 0 )
 				end
 			end
@@ -156,6 +175,7 @@ if SERVER then
 			local RemainingCharge = ChargeEnergy
 			for _, Battery in ipairs( Batteries ) do
 				if not IsValid( Battery ) or Battery.FuelType ~= "Electric" or not Battery.Active or not Battery.Legal then continue end
+				if IsBatterySpent( Battery ) then continue end
 
 				local Room = math.max( Battery.Capacity - Battery.Fuel, 0 )
 				local AddedCharge = math.min( Room, RemainingCharge )
