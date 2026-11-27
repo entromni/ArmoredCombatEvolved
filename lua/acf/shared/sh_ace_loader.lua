@@ -530,7 +530,12 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber, Subclass)
 	-- Canonical size, so a gun and a crate set to the same number get the same ID:
 	-- snap to a preset within 0.05 mm, otherwise use 0.1 mm steps (units are cm).
 	for _, Anchor in ipairs(Anchors) do
-		if math.abs(Caliber - Anchor.caliber) <= 0.005001 then return table.Copy(Anchor), 1, Anchor.id end
+		if math.abs(Caliber - Anchor.caliber) <= 0.005001 then
+			-- The laser's 130 mm endpoint is a preset anchor, but it must still
+			-- receive the same physical model scale as interpolated calibers.
+			local ModelScale = Base.gunclass == "SFL" and Anchor.caliber / Anchors[1].caliber or 1
+			return table.Copy(Anchor), ModelScale, Anchor.id
+		end
 	end
 	Caliber = math.Round(Caliber, 2)
 
