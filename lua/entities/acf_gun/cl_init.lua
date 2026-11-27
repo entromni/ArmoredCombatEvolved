@@ -43,9 +43,48 @@ function ENT:Draw()
 
 end
 
+-- Applies custom caliber collision and visuals. Checked from Think so it also
+-- covers late joiners and a client physics object that has been lost.
+local function UpdateCaliberScale(Gun)
+	local Scale = Gun:GetNWFloat("ACE_ModelScale", 1)
+	if Scale == 1 then return end
+	if Gun.ACE_AppliedScale == Scale and IsValid(Gun:GetPhysicsObject()) then return end
+	if not Gun:ACE_ApplyScaledCollision(Scale) then return end
+
+	local Phys = Gun:GetPhysicsObject()
+	Phys:EnableMotion(false)
+	Phys:Sleep()
+
+	local Mat = Matrix()
+	Mat:Scale(Vector(Scale, Scale, Scale))
+	Gun:EnableMatrix("RenderMultiply", Mat)
+	Gun:SetRenderBounds(Gun:GetCollisionBounds())
+	Gun:DrawShadow(false)
+
+	Gun.ACE_AppliedScale = Scale
+end
+
+-- The client physics object does not follow the entity by itself (same approach
+-- as ace_scalability). Unscaled guns return nothing and keep default behaviour.
+function ENT:CalcAbsolutePosition(Position, Angles)
+	if not self.ACE_AppliedScale then return end
+
+	local Phys = self:GetPhysicsObject()
+	if IsValid(Phys) then
+		Phys:SetPos(self:GetPos())
+		Phys:SetAngles(self:GetAngles())
+		Phys:EnableMotion(false)
+		Phys:Sleep()
+	end
+
+	return Position, Angles
+end
+
 function ENT:Think()
 
 	self.BaseClass.Think( self )
+
+	UpdateCaliberScale( self )
 
 	local SinceFire = CurTime() - self.LastFire
 	self:SetCycle( math.min( SinceFire * self.Rate / self.RateScale, 1 ) )

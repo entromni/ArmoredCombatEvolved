@@ -349,22 +349,25 @@ do
 		Gun:SetNWInt( "SoundPitch", Gun.SoundPitch )
 
 		Gun:SetModel(Gun.Model)
-		if ModelScale ~= 1 then
-			Gun:SetModelScale(ModelScale, 0)
-			Gun.CannonCaliberScale = ModelScale
-		end
-
-		-- Use the model's normal VPhysics initialization after setting scale.
-		-- The previous custom hull rebuild consumed GetMeshConvexes() output,
-		-- which is not a reliable PhysicsInitMultiConvex input and could leave
-		-- the entity with invalid collision after activation.
 		Gun:PhysicsInit(SOLID_VPHYSICS)
 
 		Gun:SetMoveType( MOVETYPE_VPHYSICS )
 		Gun:SetSolid( SOLID_VPHYSICS )
 
+		-- Never SetModelScale: it broke client traces. Scale the collision mesh here;
+		-- the client does the same and scales the visuals (see cl_init.lua).
+		Gun.CannonCaliberScale = 1
+		if ModelScale ~= 1 then
+			if Gun:ACE_ApplyScaledCollision(ModelScale) then
+				Gun.CannonCaliberScale = ModelScale
+				Gun:SetNWFloat( "ACE_ModelScale", ModelScale )
+			else
+				ErrorNoHalt("ACE: could not scale gun collision for " .. Gun.Model .. "\n")
+			end
+		end
+
 		local Muzzle = Gun:GetAttachment( Gun:LookupAttachment( "muzzle" ) )
-		Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos)
+		Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos) * Gun.CannonCaliberScale
 
 		local longbarrel = ClassData.longbarrel
 		if longbarrel ~= nil then
@@ -372,7 +375,7 @@ do
 				if not IsValid(Gun) then return end
 				if Gun:GetBodygroup( longbarrel.index ) == longbarrel.submodel then
 					local Muzzle = Gun:GetAttachment( Gun:LookupAttachment( longbarrel.newpos ) )
-					Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos)
+					Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos) * Gun.CannonCaliberScale
 				end
 			end)
 		end
@@ -661,10 +664,10 @@ function ENT:CanProperty( _, property )
 			timer.Simple(0.25, function() --need to wait until after the property is actually set
 				if self:GetBodygroup( longbarrel.index ) == longbarrel.submodel then
 					local Muzzle = self:GetAttachment( self:LookupAttachment( longbarrel.newpos ) )
-					self.Muzzle = self:WorldToLocal(Muzzle.Pos)
+					self.Muzzle = self:WorldToLocal(Muzzle.Pos) * (self.CannonCaliberScale or 1)
 				else
 					local Muzzle = self:GetAttachment( self:LookupAttachment( "muzzle" ) )
-					self.Muzzle = self:WorldToLocal(Muzzle.Pos)
+					self.Muzzle = self:WorldToLocal(Muzzle.Pos) * (self.CannonCaliberScale or 1)
 				end
 			end)
 		end
