@@ -229,8 +229,8 @@ function ENT:Update( ArgsTable )
 	local Id = ArgsTable[4] -- Argtable[4] is the engine ID
 	local GearboxData = GearboxTable[Id]
 
-	if GearboxData.model ~= self.Model or (GearboxData.ACE_ModelScale or 1) ~= self.ACE_ModelScale then
-		return false, "The new gearbox must have the same model and size!"
+	if GearboxData.model ~= self.Model then
+		return false, "The new gearbox must have the same model!"
 	end
 
 	if self.Id ~= Id then
@@ -283,6 +283,55 @@ function ENT:Update( ArgsTable )
 		self.Inputs = Wire_CreateInputs( self, Inputs )
 		self.Outputs = WireLib.CreateSpecialOutputs( self, Outputs, OutputTypes )
 		Wire_TriggerOutput( self, "Entity", self )
+	end
+
+	-- Refresh the selected gearbox's weight even when its ID is unchanged.
+	self.Mass = GearboxData.weight or self.Mass or 1
+
+	-- Apply a requested size change without replacing the gearbox entity.
+	-- The model must remain the same, but its custom collision and attachment
+	-- offsets need to be rebuilt for the new uniform scale.
+	local NewScale = GearboxData.ACE_ModelScale or 1
+	if NewScale ~= self.ACE_ModelScale then
+		if NewScale == 1 then
+			self:PhysicsInit(SOLID_VPHYSICS)
+			self:SetMoveType(MOVETYPE_VPHYSICS)
+			self:SetSolid(SOLID_VPHYSICS)
+			self:EnableCustomCollisions(false)
+		elseif not self:ACE_ApplyScaledCollision(NewScale) then
+			return false, "Failed to rebuild gearbox collision for the new size!"
+		end
+
+		self.ACE_ModelScale = NewScale
+		self:SetNWFloat("ACE_ModelScale", NewScale)
+
+		-- Recalculate the model-space connection points from the unscaled model.
+		self.In = self:WorldToLocal(self:GetAttachment(self:LookupAttachment("input")).Pos) * NewScale
+		self.OutL = self:WorldToLocal(self:GetAttachment(self:LookupAttachment("driveshaftL")).Pos) * NewScale
+		self.OutR = self:WorldToLocal(self:GetAttachment(self:LookupAttachment("driveshaftR")).Pos) * NewScale
+
+		-- Existing drivetrain links belong to this entity; keep them connected
+		-- while updating their output points and rope lengths for the new size.
+		for _, Link in pairs(self.WheelLink) do
+			local Out = Link.Side == 0 and self.OutL or self.OutR
+			local OutWorld = self:LocalToWorld(Out)
+			local In = Link.Ent.IsGeartrain and Link.Ent.In or vector_origin
+			local InWorld = Link.Ent:LocalToWorld(In)
+
+			if IsValid(Link.Rope) then Link.Rope:Remove() end
+			Link.Output = Out
+			Link.RopeLen = (OutWorld - InWorld):Length()
+			Link.Rope = nil
+			if self:CPPIGetOwner():GetInfoNum("ace_mobility_rope_links", 1) == 1 then
+				Link.Rope = ACE_CreateLinkRope(OutWorld, self, Out, Link.Ent, In)
+			end
+		end
+
+		local Phys = self:GetPhysicsObject()
+		if IsValid(Phys) then
+			Phys:SetMass(self.Mass)
+			self.ModelInertia = 0.99 * Phys:GetInertia() / Phys:GetMass()
+		end
 	end
 
 	if self.CVT then
