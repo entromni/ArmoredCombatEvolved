@@ -8,6 +8,11 @@ include("shared.lua")
 
 local TankTable = ACE.Weapons.FuelTanksSize
 
+-- A battery that falls below 1% of its original rated charge is considered
+-- irreversibly depleted. This is a named fraction of original capacity, not
+-- a fixed kWh value, so it scales with every battery size.
+local BATTERY_RECHARGE_CUTOFF_FRACTION = 0.01
+
 do
 
 	local FueltankWireDescs = {
@@ -99,7 +104,35 @@ function ENT:ACF_Activate( Recalc )
 
 end
 
-function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )	--This function needs to return HitRes
+local function StartBatteryCookoff( self, Inflictor )
+	if self.CookingOff or self.CookoffFinished then return end
+
+	self.CookingOff = true
+	self.CookoffSpent = true -- permanent charge/recharge lockout after thermal runaway
+	self.Exploding = true
+	self.CookoffDrainRate = math.max( self.Capacity / 12, 0.1 )
+	self.CookoffLastThink = CurTime()
+	self.NextCookoffEffect = 0
+	self.NextCookoffDamage = 0
+	self.CookoffDamageRadius = math.Clamp( math.max( math.sqrt( self.ACF.Area or 0 ) * 6, self:BoundingRadius() * 5, 200 ), 200, 500 )
+
+	if not self.CookoffSoundStarted then
+		-- This is a looped Source fire ambience; EmitSound broadcasts it to clients.
+		self:EmitSound( "ambient/fire/ignite.wav", 90, math.random( 90, 105 ), 1 )
+		self:EmitSound( "ambient/fire/fire_small_loop1.wav", 85, math.random( 90, 105 ), 0.9 )
+		self.CookoffSoundStarted = true
+	end
+
+	if IsValid( Inflictor ) and Inflictor:IsPlayer() then
+		self.Inflictor = Inflictor
+	end
+
+	-- Preserve the entity through cookoff; ACF must not remove it as a killed prop.
+	self.ACF.Health = math.max( self.ACF.Health or 0, 1 )
+	self:NextThink( CurTime() )
+end
+
+function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )
 
 	local Mul = (((Type == "HEAT" or Type == "THEAT" or Type == "HEATFS" or Type == "THEATFS") and ACE.HEATMulFuel) or 1) --Heat penetrators deal bonus damage to fuel
 	local HitRes = ACE_PropDamage( Entity, Energy, FrArea * Mul, Angle, Inflictor ) --Calling the standard damage prop function
@@ -108,17 +141,17 @@ function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )	-
 	if self.Exploding or NoExplode or not self.IsExplosive then return HitRes end
 
 	if HitRes.Kill then
+		if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
 
-	if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
-
-		self.Exploding = true
-
-		if IsValid(Inflictor) and Inflictor:IsPlayer() then
-			self.Inflictor = Inflictor
+		if self.FuelType == "Electric" then
+			StartBatteryCookoff( self, Inflictor )
+			HitRes.Kill = false
+			return HitRes
 		end
 
-		ACE_ScaledExplosion( self , true )
-
+		self.Exploding = true
+		if IsValid( Inflictor ) and Inflictor:IsPlayer() then self.Inflictor = Inflictor end
+		ACE_ScaledExplosion( self, true )
 		return HitRes
 	end
 
@@ -127,18 +160,18 @@ function ENT:ACF_OnDamage( Entity, Energy, FrArea, Angle, Inflictor, _, Type )	-
 
 	--it's gonna blow
 	if math.Rand(0, 1.2) < (ExplodeChance + Ratio) then
+		if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
 
-	if hook.Run( "ACE_FuelExplode", self ) == false then return HitRes end
+		if self.FuelType == "Electric" then
+			StartBatteryCookoff( self, Inflictor )
+			return HitRes
+		end
 
 		self.Inflictor = Inflictor
 		self.Exploding = true
-
-		timer.Simple(math.Rand(0.1, 1), function()
-			if IsValid(self) then
-				ACE_ScaledExplosion( self , true )
-			end
+		timer.Simple( math.Rand( 0.1, 1 ), function()
+			if IsValid( self ) then ACE_ScaledExplosion( self, true ) end
 		end )
-
 	else												--spray some fuel around
 		self:NextThink( CurTime() + 0.1 )
 		if self.FuelType ~= "Electric" then
@@ -314,7 +347,8 @@ function ENT:UpdateFuelTank(_, _, Data2)
 	if self.FuelType == "Electric" then
 		self.Liters   = self.Capacity --batteries capacity is different from internal volume
 		self.Capacity = self.Capacity * ACE.LiIonED
-		self.Fuel     = pct * self.Capacity
+		self.OriginalCapacity = self.Capacity -- rated charge used as the battery's reference capacity
+		self.Fuel     = self.CookoffSpent and 0 or pct * self.Capacity
 	else
 		self.Fuel	= pct * self.Capacity
 	end
@@ -360,6 +394,12 @@ function ENT:UpdateOverlayText()
 		if self.Leaking > 0 then
 			text = text .. "\n- Leaking: " .. math.Round(self.Leaking, 1) .. " liters per second"
 		end
+	end
+
+	if self.CookingOff then
+		text = text .. "\n\nBATTERY THERMAL RUNAWAY"
+	elseif self.CookoffSpent then
+		text = text .. "\n\nBattery permanently depleted - cannot recharge"
 	end
 
 	if not self.Legal then
@@ -429,6 +469,124 @@ end
 
 function ENT:Think()
 
+	if self.FuelType == "Electric" and not self.CookoffSpent then
+		local OriginalCapacity = self.OriginalCapacity or self.Capacity
+		local Cutoff = OriginalCapacity * BATTERY_RECHARGE_CUTOFF_FRACTION
+		if self.Fuel <= Cutoff then
+			self.CookoffSpent = true
+			self.Fuel = 0
+			self:UpdateOverlayText()
+		end
+	end
+
+	if self.CookingOff then
+		local Now = CurTime()
+		local Delta = math.max( Now - ( self.CookoffLastThink or Now ), 0 )
+		self.CookoffLastThink = Now
+		self.Fuel = math.max( self.Fuel - ( self.CookoffDrainRate or 0 ) * Delta, 0 )
+
+		if Now >= ( self.NextCookoffEffect or 0 ) then
+			local Effect = EffectData()
+			Effect:SetOrigin( self:GetPos() )
+			Effect:SetNormal( Vector( 0, 0, 1 ) )
+			Effect:SetScale( 1 )
+			util.Effect( "ace_battery_cookoff", Effect, true, true )
+			self.NextCookoffEffect = Now + 0.1
+		end
+
+		-- The plume is blocked by solid geometry and shares a finite energy
+		-- budget. Targets are processed nearest-first; each exposed target
+		-- absorbs most of the remaining energy before anything behind it.
+		if Now >= ( self.NextCookoffDamage or 0 ) then
+			local Radius = self.CookoffDamageRadius or 200
+			local Attacker = IsValid( self.Inflictor ) and self.Inflictor or self
+			local Origin = self:WorldSpaceCenter()
+			local BaseEnergyBudget = 8 -- kJ of chemical energy available per pulse
+			local EnergyBudget = BaseEnergyBudget
+
+			local Targets = ents.FindInSphere( Origin, Radius )
+			table.sort( Targets, function( A, B )
+				if not IsValid( A ) then return false end
+				if not IsValid( B ) then return true end
+				return Origin:DistToSqr( A:WorldSpaceCenter() ) < Origin:DistToSqr( B:WorldSpaceCenter() )
+			end )
+
+			for _, Target in ipairs( Targets ) do
+				if EnergyBudget <= 1 then break end
+				if Target == self or not IsValid( Target ) or Target:IsWorld() then continue end
+
+				local TargetPos = Target:WorldSpaceCenter()
+				local Distance = Origin:Distance( TargetPos )
+				local Falloff = 1 - math.Clamp( Distance / Radius, 0, 1 )
+				if Falloff <= 0 then continue end
+
+				-- Solid props, walls, and compartment bulkheads occlude the plume.
+				-- Ignore only the battery; a trace that hits another entity before
+				-- the candidate means that nearer entity is the absorber.
+				local Trace = util.TraceLine( {
+					start = Origin,
+					endpos = TargetPos,
+					filter = self,
+					mask = MASK_SOLID
+				} )
+
+				if Trace.Hit and Trace.Entity ~= Target then continue end
+
+				-- Allocate 70% of remaining energy to each successive exposed
+				-- target. This makes the closest objects take the brunt and leaves
+				-- only a diminishing fraction for targets farther away.
+				local AllocatedEnergy = EnergyBudget * 0.7 * Falloff
+				if AllocatedEnergy <= 1 then continue end
+				EnergyBudget = EnergyBudget - AllocatedEnergy
+
+				if Target:IsPlayer() then
+					local Info = DamageInfo()
+					Info:SetDamage( 12 * math.Clamp( AllocatedEnergy / BaseEnergyBudget, 0, 1 ) )
+					Info:SetDamageType( DMG_BURN )
+					Info:SetAttacker( Attacker )
+					Info:SetInflictor( self )
+					Info:SetDamagePosition( TargetPos )
+					Target:TakeDamageInfo( Info )
+				else
+					local Activated = ACE.Check( Target )
+					if Activated then
+						-- ACE.Kinetic expects projectile speed in inches/sec and
+						-- mass in kg, not an energy value. Convert allocated
+						-- kJ to an equivalent 1 kg energy packet first.
+						local Speed = 39.37 * math.sqrt( AllocatedEnergy * 2000 )
+						local Energy = ACE.Kinetic( Speed, 1, 99999 )
+					local FrArea = 0.5 * Falloff
+					local HitRes = ACE.Damage( Target, Energy, FrArea, 0, Attacker, 0, nil, "Chem" )
+
+						if HitRes and HitRes.Kill and Activated == "Prop" and not Target.SpecialDamage then
+						ACE_HEKill( Target, ( TargetPos - Origin ):GetNormalized(), Energy.Kinetic or 0, Origin )
+					end
+				end
+				end
+			end
+
+			self.NextCookoffDamage = Now + 0.25
+		end
+
+		self:UpdateFuelMass()
+		self:UpdateOverlayText()
+		Wire_TriggerOutput( self, "Fuel", self.Fuel )
+		Wire_TriggerOutput( self, "Leaking", 0 )
+
+		if self.Fuel <= 0 then
+			self.CookingOff = false
+			self.CookoffFinished = true
+			self.CookoffSpent = true
+			self.CookoffDrainRate = nil
+			if self.CookoffSoundStarted then self:StopSound( "ambient/fire/fire_small_loop1.wav" ) self.CookoffSoundStarted = nil end
+			self:UpdateOverlayText()
+			return false
+		end
+
+		self:NextThink( Now + 0.1 )
+		return true
+	end
+
 	if not ACE_IsDefaultActiveInputWired(self) then
 		self.Active = ACE_GetDefaultActiveInputState(self)
 	end
@@ -453,11 +611,16 @@ function ENT:Think()
 	end
 
 	--refuelling
-	if self.Active and self.SupplyFuel and self.Fuel > 0 and self.Legal then
+	if self.Active and self.SupplyFuel and self.Fuel > 0 and self.Legal and not self.CookoffSpent then
 		self:NextThink(CurTime())
 		for _,Tank in pairs(ACE.FuelTanks) do
 
-			if self.FuelType == Tank.FuelType and not Tank.SupplyFuel and Tank.Legal then --don't refuel the refuellers, otherwise it'll be one big circlejerk
+			if self.FuelType == Tank.FuelType and not Tank.SupplyFuel and Tank.Legal and not Tank.CookoffSpent and not Tank.CookingOff then
+				if Tank.FuelType == "Electric" and Tank.Fuel <= ( Tank.OriginalCapacity or Tank.Capacity ) * BATTERY_RECHARGE_CUTOFF_FRACTION then
+					Tank.CookoffSpent = true
+					Tank.Fuel = 0
+				end
+				if not Tank.CookoffSpent then --don't refuel the refuellers, otherwise it'll be one big circlejerk
 				local dist = self:GetPos():Distance(Tank:GetPos())
 
 				if dist < ACE.RefillDistance and (Tank.Capacity - Tank.Fuel > 0.1) then
@@ -479,6 +642,7 @@ function ENT:Think()
 						end
 					end
 				end
+				end
 			end
 		end
 	end
@@ -494,6 +658,8 @@ function ENT:Think()
 end
 
 function ENT:OnRemove()
+
+	if self.CookoffSoundStarted then self:StopSound( "ambient/fire/fire_small_loop1.wav" ) self.CookoffSoundStarted = nil end
 
 	for Key in pairs(self.Master) do
 		if IsValid( self.Master[Key] ) then
