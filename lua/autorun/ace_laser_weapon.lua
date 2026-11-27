@@ -19,7 +19,7 @@ local function GetCaliberScale(Gun)
 end
 
 local function IsLaser(Gun)
-	return IsValid(Gun) and Gun:GetClass() == "acf_gun" and (Gun.Class == "SL" or Gun.Id == LASER_ID)
+	return IsValid(Gun) and Gun:GetClass() == "acf_gun" and (Gun.Class == "SFL" or Gun.Id == LASER_ID)
 end
 
 local function IsBatteryLinkValid(Gun, Tank)
