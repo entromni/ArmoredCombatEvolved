@@ -1096,12 +1096,14 @@ function ENT:Link( Target, RopeRestore )
 	local Rope = nil
 	if self:CPPIGetOwner():GetInfoNum( "ace_mobility_rope_links", 1) == 1 then
 		if RopeRestore then
-			local SourceEnt = IsValid( RopeRestore.SourceParent ) and RopeRestore.SourceParent or self
-			local TargetEnt = IsValid( RopeRestore.TargetParent ) and RopeRestore.TargetParent or Target
-			local SourceOffset = isvector( RopeRestore.SourceOffset ) and RopeRestore.SourceOffset or OutPos
-			local TargetOffset = isvector( RopeRestore.TargetOffset ) and RopeRestore.TargetOffset or InPos
+			local HasSourceParent = IsValid( RopeRestore.SourceParent )
+			local HasTargetParent = IsValid( RopeRestore.TargetParent )
+			local SourceEnt = HasSourceParent and RopeRestore.SourceParent or self
+			local TargetEnt = HasTargetParent and RopeRestore.TargetParent or Target
+			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or OutPos
+			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or InPos
 
-			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true )
+			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true, self, Target )
 		else
 			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
 		end
