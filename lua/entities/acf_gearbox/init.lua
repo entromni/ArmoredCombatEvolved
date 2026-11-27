@@ -244,6 +244,13 @@ function ENT:Update( ArgsTable )
 		return false, "The new gearbox must have the same model or gearbox type/subtype!"
 	end
 
+	-- Rebuilding Wire ports disconnects Wire links. A size-anchor ID change
+	-- does not change the port layout when the gearbox subtype is unchanged.
+	local WireConfigChanged = self.CVT ~= (GearboxData.cvt or false)
+		or self.DoubleDiff ~= (GearboxData.doublediff or false)
+		or self.Auto ~= (GearboxData.auto or false)
+		or self.Dual ~= (GearboxData.doubleclutch or false)
+
 	if self.Id ~= Id then
 
 		self.Id		= Id
@@ -257,43 +264,45 @@ function ENT:Update( ArgsTable )
 		self.Auto	= GearboxData.auto			or false
 		self.Parentable = GearboxData.parentable	or false
 
+		if WireConfigChanged then
 		local Inputs = {"Gear","Gear Up","Gear Down"}
-		if self.CVT then
-			table.insert(Inputs,"CVT Ratio")
-		elseif self.DoubleDiff then
-			table.insert(Inputs, "Steer Rate")
-		elseif self.Auto then
-			table.insert(Inputs, "Hold Gear")
-			table.insert(Inputs, "Shift Speed Scale")
-			self.Hold = false
+			if self.CVT then
+				table.insert(Inputs,"CVT Ratio")
+			elseif self.DoubleDiff then
+				table.insert(Inputs, "Steer Rate")
+			elseif self.Auto then
+				table.insert(Inputs, "Hold Gear")
+				table.insert(Inputs, "Shift Speed Scale")
+				if WireConfigChanged then self.Hold = false end
+			end
+	
+			if self.Dual then
+				table.insert(Inputs, "Left Clutch")
+				table.insert(Inputs, "Right Clutch")
+				table.insert(Inputs, "Left Brake")
+				table.insert(Inputs, "Right Brake")
+			else
+				table.insert(Inputs, "Clutch")
+				table.insert(Inputs, "Brake")
+			end
+	
+			local Outputs = { "Ratio", "Entity", "Current Gear" }
+			local OutputTypes = { "NORMAL", "ENTITY", "NORMAL" }
+			if self.CVT then
+				table.insert(Outputs,"Min Target RPM")
+				table.insert(Outputs,"Max Target RPM")
+				table.insert(OutputTypes,"NORMAL")
+			end
+	
+			local phys = self:GetPhysicsObject()
+			if IsValid( phys ) then
+				phys:SetMass( self.Mass )
+			end
+	
+			self.Inputs = Wire_CreateInputs( self, Inputs )
+			self.Outputs = WireLib.CreateSpecialOutputs( self, Outputs, OutputTypes )
+			Wire_TriggerOutput( self, "Entity", self )
 		end
-
-		if self.Dual then
-			table.insert(Inputs, "Left Clutch")
-			table.insert(Inputs, "Right Clutch")
-			table.insert(Inputs, "Left Brake")
-			table.insert(Inputs, "Right Brake")
-		else
-			table.insert(Inputs, "Clutch")
-			table.insert(Inputs, "Brake")
-		end
-
-		local Outputs = { "Ratio", "Entity", "Current Gear" }
-		local OutputTypes = { "NORMAL", "ENTITY", "NORMAL" }
-		if self.CVT then
-			table.insert(Outputs,"Min Target RPM")
-			table.insert(Outputs,"Max Target RPM")
-			table.insert(OutputTypes,"NORMAL")
-		end
-
-		local phys = self:GetPhysicsObject()
-		if IsValid( phys ) then
-			phys:SetMass( self.Mass )
-		end
-
-		self.Inputs = Wire_CreateInputs( self, Inputs )
-		self.Outputs = WireLib.CreateSpecialOutputs( self, Outputs, OutputTypes )
-		Wire_TriggerOutput( self, "Entity", self )
 	end
 
 	-- Refresh the selected gearbox's weight even when its ID is unchanged.
@@ -345,34 +354,57 @@ function ENT:Update( ArgsTable )
 		-- then apply the new uniform scale.
 		local function GetScaledAttachment(Name)
 			local AttachmentID = self:LookupAttachment(Name)
-			local Attachment = AttachmentID and self:GetAttachment(AttachmentID)
-			if not Attachment then return vector_origin end
+			if not AttachmentID or AttachmentID <= 0 then return nil end
+
+			local Attachment = self:GetAttachment(AttachmentID)
+			if not Attachment or not Attachment.Pos then return nil end
+
 			return self:WorldToLocal(Attachment.Pos) * NewScale
 		end
 
-		self.In = GetScaledAttachment("input")
-		self.OutL = GetScaledAttachment("driveshaftL")
-		self.OutR = GetScaledAttachment("driveshaftR")
+		local NewIn = GetScaledAttachment("input")
+		local NewOutL = GetScaledAttachment("driveshaftL")
+		local NewOutR = GetScaledAttachment("driveshaftR")
+
+		-- A missing attachment must not silently become vector_origin: that
+		-- makes recreated driveshaft ropes snap to the gearbox/world origin.
+		if not NewIn or not NewOutL or not NewOutR then
+			return false, "The selected gearbox model is missing a required drivetrain attachment!"
+		end
+
+		self.In = NewIn
+		self.OutL = NewOutL
+		self.OutR = NewOutR
 
 		-- Keep existing drivetrain links attached to the resized gearbox.
-		local Owner = self:CPPIGetOwner()
-		local MakeRopes = IsValid(Owner) and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
-		for _, Link in pairs(self.WheelLink or {}) do
-			if not IsValid(Link.Ent) then continue end
+		-- Recreate rope constraints on the next tick, after SetModel/PhysicsInit
+		-- has finished updating attachment transforms. Keep the drivetrain's
+		-- logical links and selected side intact.
+		local Gearbox = self
+		timer.Simple(0, function()
+			if not IsValid(Gearbox) then return end
 
-			local Out = Link.Side == 0 and self.OutL or self.OutR
-			local OutWorld = self:LocalToWorld(Out)
-			local In = Link.Ent.IsGeartrain and Link.Ent.In or vector_origin
-			local InWorld = Link.Ent:LocalToWorld(In)
+			local Owner = Gearbox:CPPIGetOwner()
+			local MakeRopes = IsValid(Owner) and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
 
-			if IsValid(Link.Rope) then Link.Rope:Remove() end
-			Link.Output = Out
-			Link.RopeLen = (OutWorld - InWorld):Length()
-			Link.Rope = nil
-			if MakeRopes then
-				Link.Rope = ACE_CreateLinkRope(OutWorld, self, Out, Link.Ent, In)
+			for _, Link in pairs(Gearbox.WheelLink or {}) do
+				if not IsValid(Link.Ent) then continue end
+
+				local Out = Link.Side == 0 and Gearbox.OutL or Gearbox.OutR
+				local OutWorld = Gearbox:LocalToWorld(Out)
+				local In = Link.Ent.IsGeartrain and Link.Ent.In or vector_origin
+				local InWorld = Link.Ent:LocalToWorld(In)
+
+				if IsValid(Link.Rope) then Link.Rope:Remove() end
+				Link.Output = Out
+				Link.RopeLen = (OutWorld - InWorld):Length()
+				Link.Rope = nil
+
+				if MakeRopes then
+					Link.Rope = ACE_CreateLinkRope(OutWorld, Gearbox, Out, Link.Ent, In)
+				end
 			end
-		end
+		end)
 	end
 
 	-- Weight can change even if the selected size resolves to the same model
