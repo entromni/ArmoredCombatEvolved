@@ -17,14 +17,19 @@ local function IsLaser(Gun)
 	return IsValid(Gun) and Gun:GetClass() == "acf_gun" and Gun.Id == LASER_ID
 end
 
-local function IsLinkedBattery(Gun, Tank)
+local function IsBatteryLinkValid(Gun, Tank)
 	if not IsValid(Tank) or Tank:GetClass() ~= "acf_fueltank" then return false end
-	if Tank.FuelType ~= "Electric" or not Tank.Legal or not Tank.Active then return false end
-	if Tank.CookingOff or Tank.CookoffSpent or Tank.Exploding then return false end
-	if (Tank.Fuel or 0) <= 0 then return false end
+	if Tank.FuelType ~= "Electric" then return false end
 
 	local Range = LINK_RANGE * (Gun.LinkRangeMul or 1)
 	return ACE_InDist(Gun:GetPos(), Tank:GetPos(), Range)
+end
+
+local function IsBatteryOperational(Gun, Tank)
+	return IsBatteryLinkValid(Gun, Tank)
+		and Tank.Legal and Tank.Active
+		and not Tank.CookingOff and not Tank.CookoffSpent and not Tank.Exploding
+		and (Tank.Fuel or 0) > 0
 end
 
 local function SaveBatteryLinks(Gun)
@@ -140,9 +145,9 @@ local function ConsumeBatteryCharge(Gun, Requested)
 
 	for Index = #LinkList, 1, -1 do
 		local Tank = LinkList[Index]
-		if not IsValid(Tank) or not IsLinkedBattery(Gun, Tank) then
+		if not IsBatteryLinkValid(Gun, Tank) then
 			Gun:Unlink(Tank)
-		else
+		elseif IsBatteryOperational(Gun, Tank) then
 			Available = Available + math.max(Tank.Fuel or 0, 0)
 		end
 	end
@@ -152,7 +157,7 @@ local function ConsumeBatteryCharge(Gun, Requested)
 
 	for _, Tank in ipairs(LinkList) do
 		if Remaining <= 0 then break end
-		if IsLinkedBattery(Gun, Tank) then
+		if IsBatteryOperational(Gun, Tank) then
 			local Take = math.min(math.max(Tank.Fuel or 0, 0), Remaining)
 			Tank.Fuel = math.max(Tank.Fuel - Take, 0)
 			Remaining = Remaining - Take
