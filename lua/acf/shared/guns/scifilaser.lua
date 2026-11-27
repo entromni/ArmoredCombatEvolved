@@ -17,7 +17,7 @@ ACE.DefineGun("50mmSL", {
 	model = "models/weapons/w_irifle.mdl",
 	gunclass = "SFL",
 	caliber = 5.0,
-	weight = 650,
+	weight = 250,
 	year = 2022,
 	nomag = true,
 	maxrof = 600,
@@ -30,13 +30,15 @@ ACE.DefineGun("50mmSL", {
 
 -- Upper interpolation anchor gives the continuous caliber selector a 50-130 mm
 -- range. ACE interpolates between this and the 50 mm preset for custom sizes.
+-- Weights are intentionally much lower than a conventional 130 mm cannon: 250 kg
+-- at 50 mm and 1,800 kg at 130 mm, linearly interpolated by ACE.
 ACE.DefineGun("130mmSL", {
 	name = "130mm Continuous Laser",
 	desc = "The large-bore 130 mm continuous laser interpolation anchor.",
 	model = "models/weapons/w_irifle.mdl",
 	gunclass = "SFL",
 	caliber = 13.0,
-	weight = 11414,
+	weight = 1800,
 	year = 2022,
 	nomag = true,
 	maxrof = 600,
