@@ -374,18 +374,49 @@ function ENT:Update( ArgsTable )
 			end
 		end
 
+		-- Read model attachment offsets immediately after changing the model,
+		-- before PhysicsInit replaces the physics object. On some restored or
+		-- parented gearboxes, querying attachments after PhysicsInit returns
+		-- stale bone transforms and can falsely report invalid attachment data.
+		local function ReadModelAttachments(Scale)
+			local function ReadAttachment(Name)
+				local AttachmentID = self:LookupAttachment(Name)
+				if not AttachmentID or AttachmentID <= 0 then return nil end
+
+				local Attachment = self:GetAttachment(AttachmentID)
+				if not Attachment or not isvector(Attachment.Pos) then return nil end
+
+				local LocalPos = self:WorldToLocal(Attachment.Pos)
+				local Mins, Maxs = self:GetModelBounds()
+				local Radius = math.max(Mins:Length(), Maxs:Length()) + 32
+				if not isvector(LocalPos) or LocalPos:Length() > Radius then return nil end
+
+				return LocalPos * Scale
+			end
+
+			return {
+				In = ReadAttachment("input"),
+				OutL = ReadAttachment("driveshaftL"),
+				OutR = ReadAttachment("driveshaftR"),
+			}
+		end
+
 		local function BuildCollision(Model, Scale)
 			self:SetModel(Model)
+			local Attachments = ReadModelAttachments(Scale)
 
+			local Success
 			if Scale == 1 then
 				self:PhysicsInit(SOLID_VPHYSICS)
 				self:SetMoveType(MOVETYPE_VPHYSICS)
 				self:SetSolid(SOLID_VPHYSICS)
 				self:EnableCustomCollisions(false)
-				return IsValid(self:GetPhysicsObject())
+				Success = IsValid(self:GetPhysicsObject())
+			else
+				Success = self:ACE_ApplyScaledCollision(Scale)
 			end
 
-			return self:ACE_ApplyScaledCollision(Scale)
+			return Success, Attachments
 		end
 
 		local function RollbackResize()
@@ -397,17 +428,16 @@ function ENT:Update( ArgsTable )
 			self.In, self.OutL, self.OutR = OldIn, OldOutL, OldOutR
 		end
 
-		if not BuildCollision(NewModel, NewScale) then
+		local CollisionBuilt, ModelAttachments = BuildCollision(NewModel, NewScale)
+		if not CollisionBuilt then
 			RollbackResize()
 			return false, "Failed to rebuild gearbox collision for the selected size/model!"
 		end
 
 		RestoreTransformAndPhysics()
 
-		-- If the model anchor is unchanged, the old local attachment vectors
-		-- are already valid. Scale those vectors by the ratio of the new and
-		-- old model scales instead of querying bone attachments after physics
-		-- reconstruction (which can return stale/world-origin positions).
+		-- Keep cached offsets for the same model; for an anchor/model change,
+		-- use the offsets captured after SetModel but before PhysicsInit.
 		local AttachmentScale = OldScale > 0 and NewScale / OldScale or nil
 		local NewIn, NewOutL, NewOutR
 
@@ -417,28 +447,9 @@ function ENT:Update( ArgsTable )
 			NewOutR = isvector(OldOutR) and OldOutR * AttachmentScale or nil
 		end
 
-		local function GetScaledAttachment(Name)
-			local AttachmentID = self:LookupAttachment(Name)
-			if not AttachmentID or AttachmentID <= 0 then return nil end
-
-			local Attachment = self:GetAttachment(AttachmentID)
-			if not Attachment or not isvector(Attachment.Pos) then return nil end
-
-			local LocalPos = self:WorldToLocal(Attachment.Pos)
-			local Mins, Maxs = self:GetModelBounds()
-			local Radius = math.max(Mins:Length(), Maxs:Length()) + 32
-
-			-- Reject a stale attachment matrix that resolves to world origin (or
-			-- another point far outside this model). Do not turn it into a local
-			-- offset and then permanently cache that bad endpoint.
-			if not isvector(LocalPos) or LocalPos:Length() > Radius then return nil end
-
-			return LocalPos * NewScale
-		end
-
-		NewIn = NewIn or GetScaledAttachment("input")
-		NewOutL = NewOutL or GetScaledAttachment("driveshaftL")
-		NewOutR = NewOutR or GetScaledAttachment("driveshaftR")
+		NewIn = NewIn or ModelAttachments.In
+		NewOutL = NewOutL or ModelAttachments.OutL
+		NewOutR = NewOutR or ModelAttachments.OutR
 
 		if not isvector(NewIn) or not isvector(NewOutL) or not isvector(NewOutR) then
 			RollbackResize()
