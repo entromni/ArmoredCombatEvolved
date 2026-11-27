@@ -214,8 +214,8 @@ do
 		local ModelScale = 1
 		-- Menu CVar is millimeters; ACE gun definitions use centimeters.
 		local RequestedCaliber = tonumber(Caliber)
-		if Lookup.gunclass == "C" and RequestedCaliber and RequestedCaliber > 0 then
-			Lookup, ModelScale, Id = ACE.InterpolateCannonPreset(Id, RequestedCaliber / 10)
+		if not Lookup.rack and RequestedCaliber and RequestedCaliber > 0 then
+			Lookup, ModelScale, Id = ACE.InterpolateGunPreset(Id, RequestedCaliber / 10)
 		end
 		local ClassData = GunClasses[Lookup.gunclass]
 
