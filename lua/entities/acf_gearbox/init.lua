@@ -316,9 +316,13 @@ function ENT:Update( ArgsTable )
 
 	-- Migrate entities saved before procedural scaling added these fields.
 	-- Their actual model is authoritative; missing scale means stock scale.
-	local CurrentModel = self.Model or self:GetModel()
+	-- The entity's actual model is authoritative. `self.Model` is only a
+	-- cached gearbox-definition field and may be stale on older live entities.
+	-- Treat a stale cache as a migration too, so attachment/physics state is
+	-- rebuilt instead of silently trusting old cached In/Out vectors.
+	local CurrentModel = self:GetModel()
 	local LegacyScaleMissing = self.ACE_ModelScale == nil
-	local ModelChanged = NewModel ~= CurrentModel
+	local ModelChanged = NewModel ~= CurrentModel or self.Model ~= NewModel
 	local ScaleChanged = NewScale ~= (self.ACE_ModelScale or 1) or LegacyScaleMissing
 
 	if ModelChanged or ScaleChanged then
