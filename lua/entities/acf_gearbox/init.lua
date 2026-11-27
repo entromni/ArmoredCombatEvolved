@@ -1103,7 +1103,7 @@ function ENT:Link( Target, RopeRestore )
 			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or OutPos
 			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or InPos
 
-			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true, self, Target )
+			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, false, self, Target )
 		else
 			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
 		end
