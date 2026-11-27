@@ -1057,7 +1057,7 @@ do
 
 end
 
-function ENT:Link( Target )
+function ENT:Link( Target, RopeRestore )
 
 	if self.ACE_LinkRefreshPending or (IsValid(Target) and Target.ACE_LinkRefreshPending) then
 		return false, "Gearbox attachments are refreshing after a size update; try linking again in a moment!"
@@ -1095,7 +1095,16 @@ function ENT:Link( Target )
 
 	local Rope = nil
 	if self:CPPIGetOwner():GetInfoNum( "ace_mobility_rope_links", 1) == 1 then
-		Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
+		if RopeRestore then
+			local SourceEnt = IsValid( RopeRestore.SourceParent ) and RopeRestore.SourceParent or self
+			local TargetEnt = IsValid( RopeRestore.TargetParent ) and RopeRestore.TargetParent or Target
+			local SourceOffset = isvector( RopeRestore.SourceOffset ) and RopeRestore.SourceOffset or OutPos
+			local TargetOffset = isvector( RopeRestore.TargetOffset ) and RopeRestore.TargetOffset or InPos
+
+			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true )
+		else
+			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
+		end
 	end
 
 	local Phys	= Target:GetPhysicsObject()
@@ -1150,52 +1159,78 @@ end
 
 function ENT:PreEntityCopy()
 
-	-- Link Saving
 	local info = {}
 	local entids = {}
+	local linkData = {}
 
-	-- Clean the table of any invalid entities
+	-- Remove invalid references before serializing links.
 	for Key, Link in pairs( self.WheelLink ) do
 		if not IsValid( Link.Ent ) then
 			table.remove( self.WheelLink, Key )
 		end
 	end
 
-	-- Then save it
-	for _, Link in pairs( self.WheelLink ) do
-		table.insert( entids, Link.Ent:EntIndex() )
+	local function SaveEndpoint( Entity, LocalPos )
+		local Parent = Entity:GetParent()
+		if not IsValid( Parent ) then return nil, LocalPos end
+
+		return Parent:EntIndex(), Parent:WorldToLocal( Entity:LocalToWorld( LocalPos ) )
+	end
+
+	for _, Link in ipairs( self.WheelLink ) do
+		local Target = Link.Ent
+		local TargetIn = Target.IsGeartrain and Target.In or vector_origin
+		local SourceParentID, SourceOffset = SaveEndpoint( self, Link.Output )
+		local TargetParentID, TargetOffset = SaveEndpoint( Target, TargetIn )
+		local TargetID = Target:EntIndex()
+
+		table.insert( entids, TargetID )
+		linkData[ TargetID ] = {
+			SourceParentID = SourceParentID,
+			SourceOffset = SourceOffset,
+			TargetParentID = TargetParentID,
+			TargetOffset = TargetOffset,
+		}
 	end
 
 	info.entities = entids
-	if info.entities then
-		duplicator.StoreEntityModifier( self, "WheelLink", info )
-	end
+	info.links = linkData
+	duplicator.StoreEntityModifier( self, "WheelLink", info )
 
-	--Wire dupe info
 	self.BaseClass.PreEntityCopy( self )
 
 end
 
 function ENT:PostEntityPaste( Player, Ent, CreatedEntities )
 
-	-- Link Pasting
-	if Ent.EntityMods and Ent.EntityMods.WheelLink and Ent.EntityMods.WheelLink.entities then
-		local WheelLink = Ent.EntityMods.WheelLink
-		if WheelLink.entities and next( WheelLink.entities ) then
-			timer.Simple( 0, function() -- workaround for an AdvDupe2 parenting/restoration ordering issue
-				for _, ID in pairs( WheelLink.entities ) do
-					local Linked = CreatedEntities[ ID ]
-					if IsValid( Linked ) then
-						self:Link( Linked )
-					end
-				end
-			end )
-		end
-		Ent.EntityMods.WheelLink = nil
-	end
-
-	--Wire dupe info
+	-- Base class restores Wire data; gearbox links are restored synchronously
+	-- using saved parent-relative endpoints, without a timer or a race against
+	-- the later parent/constraint restoration phase.
 	self.BaseClass.PostEntityPaste( self, Player, Ent, CreatedEntities )
+
+	local Mods = Ent.EntityMods
+	local WheelLink = Mods and Mods.WheelLink
+	if WheelLink and WheelLink.entities then
+		for _, ID in ipairs( WheelLink.entities ) do
+			local Linked = CreatedEntities[ ID ]
+			if not IsValid( Linked ) then continue end
+
+			local Saved = WheelLink.links and WheelLink.links[ ID ]
+			local Restore
+			if Saved then
+				Restore = {
+					SourceParent = Saved.SourceParentID and CreatedEntities[ Saved.SourceParentID ],
+					SourceOffset = Saved.SourceOffset,
+					TargetParent = Saved.TargetParentID and CreatedEntities[ Saved.TargetParentID ],
+					TargetOffset = Saved.TargetOffset,
+				}
+			end
+
+			self:Link( Linked, Restore )
+		end
+
+		Mods.WheelLink = nil
+	end
 
 end
 
