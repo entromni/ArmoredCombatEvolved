@@ -395,6 +395,19 @@ do
 	end
 end
 
+-- Called by the ACE tool after Entity:Activate(), which can rebuild scaled VPhysics.
+function ENT:ACE_FinalizeCustomCaliberPhysics()
+	local phys = self:GetPhysicsObject()
+	if not IsValid(phys) then return false end
+
+	if self.Mass and self.Mass > 0 then phys:SetMass(self.Mass) end
+	if phys:GetMass() > 0 then
+		self.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass()
+	end
+
+	return true
+end
+
 -- Include continuous caliber in tool updates and duplicator arguments.
 list.Set( "ACFCvars", "acf_gun", {"id", "caliber", "baseid", "subclass"} )
 duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id", "Caliber", "BaseId", "Subclass")
