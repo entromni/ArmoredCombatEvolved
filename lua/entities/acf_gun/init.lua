@@ -1,361 +1,41 @@
-AddCSLuaFile("cl_init.lua")
-AddCSLuaFile("shared.lua")
-
-include("shared.lua")
-
-local GunClasses = ACE.Classes.GunClass
-
-local GunTable = ACE.Weapons.Guns
-
---The distances these ents would have if its caliber was 10mm. Incremented by caliber size.
-local CrewLinkDistBase = 200
-local AmmoLinkDistBase = 512
-
-local function AttemptFirstLoad(Gun, Crate)
-	if not IsValid(Gun) or not IsValid(Crate) then return end
-	if Gun.BulletData.Type ~= "Empty" then return end
-	if not Crate.Load or not Gun.FirstLoad or not Gun.Legal then return end
-
-	-- Reload=true sends the scale-0 muzzleflash effect (no sound/flash), which runs the client
-	-- Animate(LoadOnly) that initializes the gun's animation state. Without it the client stays in
-	-- cl_init's default state (Reload == CloseTime -> infinite playback rate + per-Think
-	-- ResetSequence), which strobes the load animation.
-	Gun:LoadAmmo(false, true)
-end
-
--- Compute the next-shot reload time without mutating ammo, stamina, or the active
--- reload timer. Link changes and ROFLimit use this same calculation as LoadAmmo so
--- the visible Fire Rate cannot lag behind the configured weapon state.
-local function GetGunReloadTime(Gun, BulletData, RoFMul)
-	if not BulletData then return end
-
-	local Adj = BulletData.LengthAdj or 1
-	local MaxRof = Gun.ROFLimit
-	if Gun.maxrof then
-		MaxRof = MaxRof ~= 0 and math.min(Gun.maxrof, MaxRof) or Gun.maxrof
-	end
-
-	local FireRateModifier = Gun.RoFmod * Gun.PGRoFmod * ((RoFMul or 0) + 1)
-	local DefaultReloadTime = ((math.max(BulletData.RoundVolume, Gun.MinLengthBonus / Adj) / 500) ^ 0.60)
-		* FireRateModifier
-	local LowestReloadTime = MaxRof > 0 and 60 / MaxRof or DefaultReloadTime
-	local Loader = Gun:ChooseLoader()
-	local CanUseLoader = not ACE_table_contains({ "AC", "MG", "RAC", "HMG", "GL", "SA" }, Gun.Class)
-		and Gun.maxrof and Gun.LoaderCount > 0 and IsValid(Loader)
-
-	if CanUseLoader then
-		local CrewReload = Loader.Stamina / 100
-		-- Crew stamina scales the reload down toward the fire-rate floor, but that floor is a hard
-		-- minimum: a ROFLimit (or undersized ammo) slower than the shell's physical reload leaves
-		-- LowestReloadTime > DefaultReloadTime, so the upper bound is raised to LowestReloadTime to
-		-- keep the clamp band from inverting -- otherwise the loader would fire past the set cap.
-		local SlowestReloadTime = math.max(LowestReloadTime, DefaultReloadTime)
-		return math.Clamp(LowestReloadTime / CrewReload, LowestReloadTime, SlowestReloadTime), Loader
-	end
-
-	return math.max(DefaultReloadTime, LowestReloadTime)
-end
-
-local function RefreshGunRateOfFire(Gun, AmmoEnt)
-	local BulletData
-	local RoFMul
-	if IsValid(AmmoEnt) and AmmoEnt.BulletData then
-		BulletData = AmmoEnt.BulletData
-		RoFMul = AmmoEnt.RoFMul
-	elseif Gun.BulletData and Gun.BulletData.Type ~= "Empty" then
-		BulletData = Gun.BulletData
-		local Crate = BulletData.Crate and Entity(BulletData.Crate)
-		RoFMul = IsValid(Crate) and Crate.RoFMul or 0
-	end
-
-	local ReloadTime = GetGunReloadTime(Gun, BulletData, RoFMul)
-	if not ReloadTime then return false end
-
-	Gun.RateOfFire = 60 / ReloadTime
-	Wire_TriggerOutput(Gun, "Fire Rate", Gun.RateOfFire)
-
-	return true
-end
-
-function ENT:Initialize()
-
-	self.ReloadTime          = 1
-
-	self.FirstLoad           = true
-	self.Ready               = true
-	self.Firing              = nil
-	self.Reloading           = nil
-	self.NextFire            = 0
-	self.LastSend            = 0
-	self.LastLoadDuration    = 0
-	self.NextLegalCheck      = ACE.CurTime + math.random(ACE.Legal.Min, ACE.Legal.Max) -- give any spawning issues time to iron themselves out
-	self.Legal               = true
-	self.LegalIssues         = ""
-	self.FuseTime            = 0
-	self.OverrideFuse        = false		-- Override disabled by default
-	self.ROFLimit            = 0			-- Used for selecting firerate
-
-	self.IsMaster            = true		-- needed?
-	self.OTWarnings	         = {} --Used to remember all the one time warnings.
-	self.AmmoLink            = {}
-	self.CrewLink            = {}
-	self.HasGunner           = false
-	self.RequiresGunner      = false
-	self.LoaderCount         = 0
-	self.CurAmmo             = 1
-	self.Sequence            = 1
-	self.GunClass            = "MG"
-
-	self.Heat                = ACE.AmbientTemp
-	self.IsOverheated        = false
-
-	self.BulletData          = {}
-	self.BulletData.Type     = "Empty"
-	self.BulletData.PropMass = 0
-	self.BulletData.ProjMass = 0
-
-	self.Inaccuracy          = 1
-	self.KERecoil			 = 0
-	self.LastThink           = 0
-
-	self.CanLegalCheck		= true
-
-	self:CallOnRemove("ACE_Points", function(ent)
-		if ACE_PointsInputChanged then ACE_PointsInputChanged(ent, "gun-removed") end
-	end)
-end
-
-do
-	local Inputs = {
-		Fire        = "Fire (Shoots a bullet if loaded. Hold to keep shooting.)",
-		Unload      = "Unload (Unloads the current shell from the gun. Leaving the gun empty.)",
-		Reload      = "Reload (Reloads the current weapon, according to the active ammo it has.)",
-		FuseTime    = "Fuse Time (Defines the required time for shell self-detonation in seconds. \nThis only work with SM, HE & HEAT rounds. \nNote that this is not really accurate.)",
-		ROFLimit    = "ROFLimit (Limits the Gun's rate of fire to the specified value in Rounds Per Minute. \nUsing a number of 0 or less will disable the firerate limit.)",
-	}
-	local Outputs = {
-		Ready           = "Ready (Returns if the gun is ready to fire.)",
-		AmmoCount       = "AmmoCount (Returns the total ammo this gun can shoot.)",
-		Entity          = "Entity [ENTITY]",
-		ShotsLeft       = "Shots Left (Returns the number of shots in the gun.)",
-		FireRate        = "Fire Rate (Returns the Rate of Fire of this gun)",
-		MuzzleWeight    = "Muzzle Weight (Returns the muzzle weight)",
-		MuzzleVelocity  = "Muzzle Velocity (Returns the muzzle velocity)" ,
-		Heat            = "Heat (Returns the gun's temperature.)",
-		OverHeat        = "OverHeat (Is the gun overheating?)"
-	}
-
-	local Inputs_Fuse = {
-		Inputs.Fire,
-		Inputs.Unload,
-		Inputs.Reload,
-		Inputs.FuseTime,
-		Inputs.ROFLimit
-	}
-	local Inputs_NoFuse = {
-		Inputs.Fire,
-		Inputs.Unload,
-		Inputs.Reload,
-		Inputs.ROFLimit
-	}
-	local Inputs_Fuse_noreload = {
-		Inputs.Fire,
-		Inputs.Unload,
-		Inputs.FuseTime,
-		Inputs.ROFLimit
-	}
-	local Inputs_NoFuse_noreload = {
-		Inputs.Fire,
-		Inputs.Unload,
-		Inputs.ROFLimit
-	}
-	local Outputs_Default = {
-		Outputs.Ready,
-		Outputs.AmmoCount,
-		Outputs.Entity,
-		Outputs.ShotsLeft,
-		Outputs.FireRate,
-		Outputs.MuzzleWeight,
-		Outputs.MuzzleVelocity,
-		Outputs.Heat,
-		Outputs.OverHeat
-	}
-
-	--List of ids which no longer stay on ACE. Useful to replace them with the closest counterparts
-	local BackComp = {
-		["20mmHRAC"]     = "20mmRAC",
-		["30mmHRAC"]     = "30mmRAC",
-		["40mmGLSingle"] = "40mmSL",
-		["105mmSB"]      = "100mmSBC",
-		["120mmSB"]      = "120mmSBC",
-		["140mmSB"]      = "140mmSBC",
-		["170mmSB"]      = "170mmSBC"
-
-	}
-
-	local rapidgun = {
-		RAC = true,
-		MG  = true,
-		AC  = true,
-		SA  = true,
-		HMG = true
-	}
-
-	function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId, Subclass)
-
-		local Gun = ents.Create("acf_gun")
-		if not IsValid(Gun) then return false end
-
-		-- Custom caliber variants store their stock anchor ID for duplicator recovery.
-		-- Prefer that ID if the generated custom ID is not registered after a restart.
-		if BaseId and GunTable[BaseId] then
-			Id = BaseId
-		elseif not ACE_CheckGun(Id) then
-			Id = BackComp[Id] or "100mmC"
-		end
-
-		local Lookup = GunTable[Id]
-		local ModelScale = 1
-		local RequestedCaliber = tonumber(Caliber)
-		Subclass = Subclass and Subclass ~= "" and Subclass or Lookup.subclass or "Standard"
-
-		-- Resolve the selected subclass to one of its own preset definitions.
-		if not Lookup.rack then
-			local SubclassPreset = ACE.GetGunSubclassPreset(Lookup.gunclass, Subclass, Lookup.caliber)
-			if SubclassPreset then
-				Id = SubclassPreset.id
-				Lookup = SubclassPreset
-			end
-		end
-		local CustomBaseID = Id
-
-		-- Menu CVar is millimeters; ACE gun definitions use centimeters.
-		if not Lookup.rack and RequestedCaliber and RequestedCaliber > 0 then
-			Lookup, ModelScale, Id = ACE.InterpolateGunPreset(Id, RequestedCaliber / 10, Subclass)
-		end
-		local ClassData = GunClasses[Lookup.gunclass]
-
-		if Lookup.gunclass == "SL" then
-			if not Owner:CheckLimit("_ace_smokelauncher") then return false end
-			Owner:AddCount("_ace_smokelauncher", Gun)
-
-		elseif rapidgun[Lookup.gunclass] then
-			if not Owner:CheckLimit("_ace_rapidgun") then return false end
-			Owner:AddCount("_ace_rapidgun", Gun)
-
-		elseif Lookup.caliber >= ACE.LargeCaliber then
-			if not Owner:CheckLimit("_ace_largegun") then return false end
-			Owner:AddCount("_ace_largegun", Gun)
-
-		else
-			if not Owner:CheckLimit("_ace_gun") then return false end
-			Owner:AddCount("_ace_gun", Gun)
-		end
-
-		Gun:SetAngles(Angle)
-		Gun:SetPos(Pos)
-		Gun:Spawn()
-		Gun:CPPISetOwner(Owner)
-		Gun.Id               = Lookup.ACE_CustomPreset and CustomBaseID or Id
-		Gun.ACE_CustomGunID   = Lookup.ACE_CustomPreset and Id or nil
-		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or nil
-		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or nil
-		Gun.ACE_CustomSubclass = Subclass
-		Gun.Caliber         = Lookup.caliber
-		Gun.Model           = Lookup.model
-		Gun.Mass            = Lookup.weight
-		Gun.Class           = Lookup.gunclass
-		Gun.Heat            = ACE.AmbientTemp
-		Gun.LinkRangeMul    = math.max(Gun.Caliber / 10,1) ^ 1.2
-		Gun.RequiresGunner	= false
-		local GunnerExcluded	= Lookup.gunnerexception or false
-
-		Gun.noloaders	= ClassData.noloader or nil
-
-		Gun.Inaccuracy = ClassData.spread
-
-		if not GunnerExcluded and (Gun.Caliber * 10) > ACE.LargeGunsThreshold and ACE.LargeGunsRequireGunners ~= 0 then --If the caliber is large enough it requires a gunner.
-			Gun.RequiresGunner = true
-		end
-
-		if ClassData.color then
-			Gun:SetColor(Color(ClassData.color[1],ClassData.color[2],ClassData.color[3], 255))
-		end
-
-		Gun.PGRoFmod	= Lookup.rofmod and math.max(0.01, Lookup.rofmod) or 1 --per gun rof
-		Gun.maxrof = Lookup.maxrof
-		Gun.CurrentShot = 0
-		Gun.MagSize	= 1
-
-		--IDK why does this has been broken, giving it sense now
-		--to cover guns that uses magazines
-		if Lookup.magsize then
-
-			Gun.MagSize = math.max(Gun.MagSize, Lookup.magsize)
-			local Cal = Gun.Caliber
-
-			if Cal >= 3 then
-				Gun.Inputs = WireLib.CreateInputs( Gun, Inputs_Fuse )
-			else
-				Gun.Inputs = WireLib.CreateInputs( Gun, Inputs_NoFuse )
-			end
-
-		--to cover guns that get its ammo directly from the crate
-		else
-			local Cal = Gun.Caliber
-
-			if Cal >= 3 then
-				Gun.Inputs = WireLib.CreateInputs( Gun, Inputs_Fuse_noreload )
-			else
-				Gun.Inputs = WireLib.CreateInputs( Gun, Inputs_NoFuse_noreload )
-			end
-		end
-
-		Gun.Outputs = WireLib.CreateOutputs( Gun, Outputs_Default )
-
-		Wire_TriggerOutput(Gun, "Entity", Gun)
-
-		Gun.MagReload = 0
-		if Lookup.magreload then
-			Gun.MagReload = math.max(Gun.MagReload, Lookup.magreload )
-		end
-
-		Gun.MinLengthBonus    = 0.5 * 3.1416 * (Gun.Caliber / 2) ^ 2 * Lookup.round.maxlength
-
-		Gun.Muzzleflash       = Lookup.muzzleflash or ClassData.muzzleflash
-		Gun.RoFmod            = ClassData.rofmod
-		Gun.RateOfFire        = 1 --updated when gun is linked to ammo
-		Gun.Sound             = Lookup.sound or ClassData.sound
-		Gun.DefaultSound      = Gun.Sound
-		Gun.SoundPitch        = 100
-		Gun.AutoSound         = ClassData.autosound and (Lookup.autosound or ClassData.autosound) or nil
-		Gun.CurrentRecoil     = 0
-
-		Gun:SetNWInt( "Caliber", Gun.Caliber )
-		Gun:SetNWString( "WireName", Lookup.name )
-		Gun:SetNWString( "Class", Gun.Class )
-		Gun:SetNWString( "ID", Gun.Id )
-		Gun:SetNWString( "ACE_CustomGunID", Gun.ACE_CustomGunID or "" )
-		Gun:SetNWString( "ACE_CustomBaseID", Gun.ACE_CustomBaseID or "" )
-		Gun:SetNWFloat( "ACE_CustomCaliber", Gun.ACE_CustomCaliber or 0 )
-		Gun:SetNWString( "ACE_CustomSubclass", Gun.ACE_CustomSubclass or "Standard" )
-		Gun:SetNWString( "Muzzleflash", Gun.Muzzleflash )
-		Gun:SetNWString( "Sound", Gun.Sound )
-		Gun:SetNWInt( "SoundPitch", Gun.SoundPitch )
-
-		Gun:SetModel( Gun.Model )
+		Gun:SetModel(Gun.Model)
 		if ModelScale ~= 1 then
 			Gun:SetModelScale(ModelScale, 0)
 			Gun.CannonCaliberScale = ModelScale
 		end
-		Gun:PhysicsInit( SOLID_VPHYSICS )
+		Gun:PhysicsInit(SOLID_VPHYSICS)
 
-		-- Let the engine rebuild the model's own physics at the entity scale.
-		-- Reconstructing GetMeshConvexes manually was producing a distorted hull,
-		-- which also made player eye traces miss the model.
+		-- SetModelScale changes the render model, not its collision mesh.
+		-- Build collision convexes from the model's original physics geometry
+		-- and scale those local vertices by the same factor.
 		if ModelScale ~= 1 then
-			Gun:Activate()
-			Gun.CannonCaliberScale = ModelScale
+			local Convexes = util.GetModelConvexes(Gun.Model)
+			local ScaledConvexes = {}
+
+			if istable(Convexes) then
+				for _, Convex in ipairs(Convexes) do
+					local ScaledConvex = {}
+					for _, Vertex in ipairs(Convex) do
+						if isvector(Vertex) then
+							ScaledConvex[#ScaledConvex + 1] = Vertex * ModelScale
+					elseif istable(Vertex) and isvector(Vertex.pos) then
+							ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
+						end
+					end
+					if #ScaledConvex >= 4 then
+						ScaledConvexes[#ScaledConvexes + 1] = ScaledConvex
+					end
+				end
+			end
+
+			if #ScaledConvexes > 0 then
+				Gun:PhysicsInitMultiConvex(ScaledConvexes)
+			else
+				-- Reliable traceable fallback if a model has no retrievable
+				-- convex physics: a scaled model-bounds box.
+				local Min, Max = util.GetModelBounds(Gun.Model)
+				Gun:PhysicsInitBox(Min * ModelScale, Max * ModelScale)
+			end
 		end
 
 		Gun:SetMoveType( MOVETYPE_VPHYSICS )
@@ -386,6 +66,11 @@ do
 		Owner:AddCleanup("acemenu", Gun)
 
 		ACE_Activate(Gun, 0)
+
+		-- Ensure the spawned custom-caliber entity has Wire ports registered
+		-- after ACF/ACE finishes its activation/update path.
+		SetupGunWirePorts(Gun, Lookup)
+		Gun:UpdateOverlayText()
 
 		return Gun
 
