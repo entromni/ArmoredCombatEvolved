@@ -201,7 +201,7 @@ do
 		HMG = true
 	}
 
-	function ACE_MakeGun(Owner, Pos, Angle, Id)
+	function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber)
 
 		local Gun = ents.Create("acf_gun")
 		if not IsValid(Gun) then return false end
@@ -210,7 +210,13 @@ do
 			Id = BackComp[Id] or "100mmC"
 		end
 
-		local Lookup	= GunTable[Id]
+		local Lookup = GunTable[Id]
+		local ModelScale = 1
+		-- Menu CVar is millimeters; ACE gun definitions use centimeters.
+		local RequestedCaliber = tonumber(Caliber)
+		if Lookup.gunclass == "C" and RequestedCaliber and RequestedCaliber > 0 then
+			Lookup, ModelScale, Id = ACE.InterpolateCannonPreset(Id, RequestedCaliber / 10)
+		end
 		local ClassData = GunClasses[Lookup.gunclass]
 
 		if Lookup.gunclass == "SL" then
@@ -314,8 +320,39 @@ do
 		Gun:SetNWInt( "SoundPitch", Gun.SoundPitch )
 
 		Gun:SetModel( Gun.Model )
-
+		if ModelScale ~= 1 then
+			Gun:SetModelScale(ModelScale, 0)
+			Gun.CannonCaliberScale = ModelScale
+		end
 		Gun:PhysicsInit( SOLID_VPHYSICS )
+
+		-- SetModelScale affects rendering, so rebuild convex collision geometry scaled
+		-- in local space to keep the custom-caliber gun's hitbox proportional.
+		if ModelScale ~= 1 then
+			local OriginalPhysics = Gun:GetPhysicsObject()
+			if IsValid(OriginalPhysics) then
+				local Convexes = OriginalPhysics:GetMeshConvexes()
+				if istable(Convexes) and #Convexes > 0 then
+					local ScaledConvexes = {}
+					for _, Convex in ipairs(Convexes) do
+						local ScaledConvex = {}
+						for _, Vertex in ipairs(Convex) do
+							if isvector(Vertex) then
+								ScaledConvex[#ScaledConvex + 1] = Vertex * ModelScale
+						elseif istable(Vertex) and isvector(Vertex.pos) then
+							ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
+						end
+					end
+					if #ScaledConvex >= 4 then ScaledConvexes[#ScaledConvexes + 1] = ScaledConvex end
+					end
+					if #ScaledConvexes > 0 then
+						Gun:PhysicsInitMultiConvex(ScaledConvexes)
+					Gun:SetMoveType(MOVETYPE_VPHYSICS)
+					Gun:SetSolid(SOLID_VPHYSICS)
+					end
+				end
+			end
+		end
 		Gun:SetMoveType( MOVETYPE_VPHYSICS )
 		Gun:SetSolid( SOLID_VPHYSICS )
 
@@ -350,8 +387,9 @@ do
 	end
 end
 
-list.Set( "ACFCvars", "acf_gun", {"id"} )
-duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id")
+-- Include continuous caliber in tool updates and duplicator arguments.
+list.Set( "ACFCvars", "acf_gun", {"id", "caliber"} )
+duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id", "Caliber")
 
 function ENT:UpdateOverlayText()
 
