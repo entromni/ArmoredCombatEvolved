@@ -11,7 +11,9 @@ local LINK_RANGE = 512
 local FIRE_INTERVAL = 0.1
 local CHARGE_TIME = 3
 -- kWh consumed per second at Power=1.0 (Power ramps from 0.55 to 1.8).
-local ENERGY_RATE = 0.6
+-- 4.8 kWh/s at the 50 mm anchor and power=1.0; scales with caliber area.
+-- No heat-based power reduction: heat only raises ACE overheat damage.
+local ENERGY_RATE = 4.8
 local CALIBER_ANCHOR = 5.0
 
 local function GetCaliberScale(Gun)
@@ -235,7 +237,8 @@ local function FireLaser(Gun)
 	if EffectiveDelta >= 0.015 and Trace.Hit and IsValid(Trace.Entity) and ACE.Check(Trace.Entity) then
 		local Target = Trace.Entity
 		local Fraction = math.Clamp(EffectiveDelta / FIRE_INTERVAL, 0, 1)
-		local BeamMass = 0.16 * Power * CaliberAreaScale * Fraction
+		-- 8x the previous energy delivery; the electrical draw is increased by the same factor.
+		local BeamMass = 1.28 * Power * CaliberAreaScale * Fraction
 		local Energy = ACE.Kinetic(900 * 39.37, BeamMass, 500)
 		local Area = 0.65
 		local HitAngle = math.deg(math.acos(math.Clamp(Trace.HitNormal:Dot(-Direction), -1, 1)))

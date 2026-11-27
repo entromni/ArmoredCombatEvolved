@@ -1,4 +1,3 @@
-local BeamMaterial = Material("cable/redlaser")
 local GlowMaterial = Material("sprites/light_glow02_add")
 
 function EFFECT:Init(Data)
@@ -18,7 +17,7 @@ function EFFECT:Render()
 	local Alpha = math.Clamp((self.DieTime - CurTime()) / 0.14, 0, 1)
 	local Width = (2.5 + self.Power * 2.5) * self.CaliberScale
 
-	render.SetMaterial(BeamMaterial)
+	render.SetColorMaterial()
 	render.DrawBeam(self.Start, self.End, Width, 0, 1, Color(255, 220, 40, 255 * Alpha))
 	render.DrawBeam(self.Start, self.End, Width * 0.35, 0, 1, Color(255, 255, 190, 255 * Alpha))
 
