@@ -12,7 +12,7 @@ ACE.DefineGunClass("SL", {
 
 ACE.DefineGun("50mmSL", {
 	name = "50mm Continuous Laser",
-	desc = "A bright yellow continuous laser. Beam power ramps up while firing; ACE handles overheating damage without disabling the weapon.",
+	desc = "A continuous bright-yellow laser powered by linked ACE electric batteries. Beam power ramps with sustained fire; overheating damages the gun but does not shut it off.",
 	model = "models/weapons/w_irifle.mdl",
 	gunclass = "SL",
 	caliber = 5.0,
