@@ -201,20 +201,7 @@ do
 		HMG = true
 	}
 
-	local function RefreshGunWirePorts(Gun, Lookup)
-	local Inputs
-	if Lookup.magsize then
-		Inputs = Gun.Caliber >= 3 and Inputs_Fuse or Inputs_NoFuse
-	else
-		Inputs = Gun.Caliber >= 3 and Inputs_Fuse_noreload or Inputs_NoFuse_noreload
-	end
-
-	Gun.Inputs = WireLib.CreateInputs(Gun, Inputs)
-	Gun.Outputs = WireLib.CreateOutputs(Gun, Outputs_Default)
-	Wire_TriggerOutput(Gun, "Entity", Gun)
-end
-
-function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId, Subclass)
+	function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId, Subclass)
 
 		local Gun = ents.Create("acf_gun")
 		if not IsValid(Gun) then return false end
@@ -269,7 +256,7 @@ function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId, Subclass)
 		Gun:SetPos(Pos)
 		Gun:Spawn()
 		Gun:CPPISetOwner(Owner)
-		Gun.Id               = Lookup.ACE_CustomPreset and CustomBaseID or Id
+		Gun.Id               = Id
 		Gun.ACE_CustomGunID   = Lookup.ACE_CustomPreset and Id or nil
 		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or nil
 		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or nil
@@ -422,10 +409,6 @@ function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId, Subclass)
 
 		ACE_Activate(Gun, 0)
 
-		-- Re-publish the finalized ports after activation; Wire's client port list
-		-- is keyed by the entity index and must reflect the final gun setup.
-		RefreshGunWirePorts(Gun, Lookup)
-		Gun:UpdateOverlayText()
 
 		return Gun
 
