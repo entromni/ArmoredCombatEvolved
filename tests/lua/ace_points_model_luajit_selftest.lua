@@ -9,11 +9,11 @@ dofile(root .. "/lua/acf/shared/sh_ace_points_model.lua")
 
 -- New armor material pricing keys must be explicit (unknown IDs fall back to RHA).
 local grapheneKE, grapheneHEAT = ACE.Points.MaterialEff("Graph")
-assert(grapheneKE == 2.1 and grapheneHEAT == 1.7, "graphene composite pricing missing")
+assert(grapheneKE == 4.5 and grapheneHEAT == 4.0, "graphene composite premium pricing missing")
 local aerogelKE, aerogelHEAT = ACE.Points.MaterialEff("Aero")
-assert(aerogelKE == 0.02 and aerogelHEAT == 0.5, "aerogel pricing missing")
+assert(aerogelKE == 2.2 and aerogelHEAT == 2.2, "aerogel premium pricing missing")
 local diamondKE, diamondHEAT = ACE.Points.MaterialEff("Diam")
-assert(diamondKE == 2.4 and diamondHEAT == 1.5, "diamond composite pricing missing")
+assert(diamondKE == 5.0 and diamondHEAT == 4.5, "diamond composite premium pricing missing")
 
 
 local empty = { Type = "APHE", maxPen = 200, FrArea = math.pi * 5 ^ 2, blastMass = 0 }
