@@ -635,6 +635,7 @@ function ENT:CheckRopes()
 
 		--skips any invalid entity and remove from list
 		if not IsValid(Ent) then continue end
+		if Ent.ACE_LinkRefreshPending then continue end
 
 		local OutPos = self:LocalToWorld( Link.Output )
 		local InPos = Ent:GetPos()
