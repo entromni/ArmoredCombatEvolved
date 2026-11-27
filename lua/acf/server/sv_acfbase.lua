@@ -611,7 +611,7 @@ end
 	This one is more simple than the original function.
 	Creates a rope without any constraint
 ------------------------------------------------------------------------]]
-function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints )
+function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, OwnerEnt1, OwnerEnt2 )
 
 	-- keyframe_rope can fail to resolve offsets on parented entities after
 	-- their physics object is rebuilt. Bind a parented endpoint to its parent
@@ -652,7 +652,11 @@ function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints )
 	rope:Spawn()
 	rope:Activate()
 
-	-- Remove the rope when either original endpoint or its parent is removed.
+	-- Keep cleanup tied to the actual gearbox/prop endpoints even when
+	-- the rope itself is attached to their parent entities.
+	OriginalEnt1 = IsValid( OwnerEnt1 ) and OwnerEnt1 or OriginalEnt1
+	OriginalEnt2 = IsValid( OwnerEnt2 ) and OwnerEnt2 or OriginalEnt2
+
 	OriginalEnt1:DeleteOnRemove( rope )
 	OriginalEnt2:DeleteOnRemove( rope )
 	if Ent1 ~= OriginalEnt1 then Ent1:DeleteOnRemove( rope ) end
