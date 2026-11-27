@@ -373,6 +373,9 @@ function ENT:Update( ArgsTable )
 
 		-- SetModel/PhysicsInit can leave server attachment transforms stale for
 		-- this frame. Cache them only after the model's bones have refreshed.
+		-- A serial prevents an older resize timer from overwriting a newer one.
+		self.ACE_LinkRefreshSerial = (self.ACE_LinkRefreshSerial or 0) + 1
+		local RefreshSerial = self.ACE_LinkRefreshSerial
 		self.ACE_LinkRefreshPending = true
 
 		-- Remove old rope entities/constraints before their physics endpoints
@@ -394,7 +397,7 @@ function ENT:Update( ArgsTable )
 
 		local Gearbox = self
 		timer.Simple(0.1, function()
-			if not IsValid(Gearbox) then return end
+			if not IsValid(Gearbox) or Gearbox.ACE_LinkRefreshSerial ~= RefreshSerial then return end
 
 			local function GetScaledAttachment(Name)
 				local AttachmentID = Gearbox:LookupAttachment(Name)
