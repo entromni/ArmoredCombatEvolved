@@ -384,24 +384,55 @@ function ENT:Update( ArgsTable )
 		timer.Simple(0, function()
 			if not IsValid(Gearbox) then return end
 
-			local Owner = Gearbox:CPPIGetOwner()
-			local MakeRopes = IsValid(Owner) and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
+			-- PhysicsInit replaces the gearbox's physics object. Rebuild ropes
+			-- on both sides of this gearbox: incoming ropes are owned by the
+			-- upstream gearbox and are not present in Gearbox.WheelLink.
+			local Gearboxes = ents.FindByClass("acf_gearbox")
 
-			for _, Link in pairs(Gearbox.WheelLink or {}) do
-				if not IsValid(Link.Ent) then continue end
+			for _, Source in ipairs(Gearboxes) do
+				if not IsValid(Source) then continue end
 
-				local Out = Link.Side == 0 and Gearbox.OutL or Gearbox.OutR
-				local OutWorld = Gearbox:LocalToWorld(Out)
-				local In = Link.Ent.IsGeartrain and Link.Ent.In or vector_origin
-				local InWorld = Link.Ent:LocalToWorld(In)
+				for _, Link in pairs(Source.WheelLink or {}) do
+					local Target = Link.Ent
+					if not IsValid(Target) then continue end
+					if Source ~= Gearbox and Target ~= Gearbox then continue end
 
-				if IsValid(Link.Rope) then Link.Rope:Remove() end
-				Link.Output = Out
-				Link.RopeLen = (OutWorld - InWorld):Length()
-				Link.Rope = nil
+					local Out = Source == Gearbox
+						and (Link.Side == 0 and Gearbox.OutL or Gearbox.OutR)
+						or Link.Output
+					local In = Target.IsGeartrain and Target.In or vector_origin
+					if not isvector(Out) or not isvector(In) then continue end
 
-				if MakeRopes then
-					Link.Rope = ACE_CreateLinkRope(OutWorld, Gearbox, Out, Link.Ent, In)
+					local OutWorld = Source:LocalToWorld(Out)
+					local InWorld = Target:LocalToWorld(In)
+
+					-- Remove the stored rope and any stale rope constraint left
+					-- attached to the old physics object.
+					if IsValid(Link.Rope) then Link.Rope:Remove() end
+					Link.Rope = nil
+
+					for _, Constraint in pairs(constraint.FindConstraints(Source, "Rope") or {}) do
+						if (Constraint.Ent1 == Source and Constraint.Ent2 == Target)
+						or (Constraint.Ent1 == Target and Constraint.Ent2 == Source) then
+							if IsValid(Constraint.Constraint) then
+								Constraint.Constraint:Remove()
+							end
+						end
+					end
+
+					if Source == Gearbox then
+						Link.Output = Out
+					end
+
+					Link.RopeLen = (OutWorld - InWorld):Length()
+
+					local Owner = Source:CPPIGetOwner()
+					local MakeRopes = IsValid(Owner)
+						and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
+
+					if MakeRopes then
+						Link.Rope = ACE_CreateLinkRope(OutWorld, Source, Out, Target, In)
+					end
 				end
 			end
 		end)
