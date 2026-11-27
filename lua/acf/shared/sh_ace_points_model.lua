@@ -328,6 +328,7 @@ local MATERIAL_EFF = {
 	ERA   = { 2.5,    8.0 },
 	Rub   = { 0.05,   3.0 },
 	Texto = { 0.5,    1.2 },
+	-- Fictional composites: these mirror their authored armor effectiveness values.
 	Graph = { 2.1,    1.7 },
 	Aero  = { 0.02,   0.5 },
 	Diam  = { 2.4,    1.5 },
