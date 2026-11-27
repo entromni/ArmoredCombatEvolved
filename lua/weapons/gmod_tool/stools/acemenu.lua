@@ -108,8 +108,12 @@ function TOOL:LeftClick( trace )
 			if not IsValid(Ent) then ACE_SendNotify(ply, false, "#tool.acemenu.creationfailed") return false end
 
 			Ent:Activate()
+			if Ent.ACE_FinalizeCustomCaliberPhysics then
+				Ent:ACE_FinalizeCustomCaliberPhysics()
+			end
 			Ent:DropToFloor()
-			Ent:GetPhysicsObject():EnableMotion( false )
+			local Phys = Ent:GetPhysicsObject()
+			if IsValid(Phys) then Phys:EnableMotion(false) end
 
 			undo.Create( entClass )
 				undo.AddEntity( Ent )
