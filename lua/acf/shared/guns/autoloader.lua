@@ -15,6 +15,7 @@ ACE.DefineGunClass("AL", {
 --add a gun to the class
 ACE.DefineGun("50mmAL", { --id
 	name = "50mm Drum Autoloader",
+	subclass = "Drum Autoloader",
 	desc = "A lightweight bullet spitting monster found on certain ground attack planes. Capable of rapidly filling targets with many high pen darts.",
 	model = "models/tankgun/tankgun_al_50mm.mdl",
 	sound = "ace_weapons/multi_sound/75mm_multi.mp3",
@@ -35,6 +36,7 @@ ACE.DefineGun("50mmAL", { --id
 --add a gun to the class
 ACE.DefineGun("75mmAL", { --id
 	name = "75mm Drum Autoloader",
+	subclass = "Drum Autoloader",
 	desc = "A quick-firing 75mm gun, pops off a number of rounds in relatively short order.",
 	model = "models/tankgun/tankgun_al_75mm.mdl",
 	sound = "ace_weapons/multi_sound/75mm_multi.mp3",
@@ -54,6 +56,7 @@ ACE.DefineGun("75mmAL", { --id
 
 ACE.DefineGun("100mmAL", {
 	name = "100mm Drum Autoloader",
+	subclass = "Drum Autoloader",
 	desc = "The 100mm is good for rapidly hitting medium armor, then running like your ass is on fire to reload.",
 	model = "models/tankgun/tankgun_al_100mm.mdl",
 	sound = "ace_weapons/multi_sound/100mm_multi.mp3",
@@ -73,6 +76,7 @@ ACE.DefineGun("100mmAL", {
 
 ACE.DefineGun("120mmAL", {
 	name = "120mm Drum Autoloader",
+	subclass = "Drum Autoloader",
 	desc = "The 120mm autoloader can do serious damage before reloading, but the reload time is killer.",
 	model = "models/tankgun/tankgun_al_120mm.mdl",
 	sound = "ace_weapons/multi_sound/120mm_multi.mp3",
@@ -92,6 +96,7 @@ ACE.DefineGun("120mmAL", {
 
 ACE.DefineGun("140mmAL", {
 	name = "140mm Drum Autoloader",
+	subclass = "Drum Autoloader",
 	desc = "The 140mm can shred a medium tank's armor with one magazine, and even function as shoot & scoot artillery, with its useful HE payload.",
 	model = "models/tankgun/tankgun_al_140mm.mdl",
 	sound = "ace_weapons/multi_sound/120mm_multi.mp3",
@@ -112,6 +117,7 @@ ACE.DefineGun("140mmAL", {
 
 ACE.DefineGun("170mmAL", {
 	name = "170mm Drum Autoloader",
+	subclass = "Drum Autoloader",
 	desc = "The 170mm can shred an average 40ton tank's armor with one magazine.",
 	model = "models/tankgun/tankgun_al_170mm.mdl",
 	sound = "ace_weapons/multi_sound/120mm_multi.mp3",
@@ -135,6 +141,7 @@ ACE.DefineGun("170mmAL", {
 
 ACE.DefineGun("50mmBAL", {
 	name = "50mm Breech Autoloader",
+	subclass = "Breech Autoloader",
 	desc = "PLACEHOLDER. 50mm Breech Autoloader. Autoloading giving it a consistent rate of fire in all conditions.",
 	model = "models/tankgun_new/tankgun_50mm.mdl",
 	sound = "ace_weapons/multi_sound/50mm_multi.mp3",
@@ -151,6 +158,7 @@ ACE.DefineGun("50mmBAL", {
 
 ACE.DefineGun("75mmBAL", {
 	name = "75mm Breech Autoloader",
+	subclass = "Breech Autoloader",
 	desc = "PLACEHOLDER. 75mm Breech Autoloader. Autoloading giving it a consistent rate of fire in all conditions.",
 	model = "models/tankgun_new/tankgun_75mm.mdl",
 	sound = "ace_weapons/multi_sound/75mm_multi.mp3",
@@ -167,6 +175,7 @@ ACE.DefineGun("75mmBAL", {
 
 ACE.DefineGun("100mmBAL", {
 	name = "100mm Breech Autoloader",
+	subclass = "Breech Autoloader",
 	desc = "PLACEHOLDER. 100mm Breech Autoloader, with good penetration performance, can perform a deadly strike in one single pass. Seen on those modern tank destroyers.",
 	model = "models/tankgun_new/tankgun_100mm.mdl",
 	sound = "ace_weapons/multi_sound/100mm_multi.mp3",
@@ -183,6 +192,7 @@ ACE.DefineGun("100mmBAL", {
 
 ACE.DefineGun("120mmBAL", {
 	name = "120mm Breech Autoloader",
+	subclass = "Breech Autoloader",
 	desc = "PLACEHOLDER. 120mm Breech Autoloader. Gives up some of the burst rate of fire of manually loaded guns for consistency and not having the cost of training loaders.",
 	model = "models/tankgun_new/tankgun_120mm.mdl",
 	sound = "ace_weapons/multi_sound/120mm_multi.mp3",
@@ -199,6 +209,7 @@ ACE.DefineGun("120mmBAL", {
 
 ACE.DefineGun("140mmBAL", {
 	name = "140mm Breech Autoloader",
+	subclass = "Breech Autoloader",
 	desc = "PLACEHOLDER. 140mm Breech Autoloader, Beefy 140mm autoloading cannon for dealing with heavily armored MBTs. With a consistent ROF due to the autoloader.",
 	model = "models/tankgun_new/tankgun_140mm.mdl",
 	sound = "ace_weapons/multi_sound/120mm_multi.mp3",
@@ -215,6 +226,7 @@ ACE.DefineGun("140mmBAL", {
 
 ACE.DefineGun("170mmBAL", {
 	name = "170mm Breech Autoloader",
+	subclass = "Breech Autoloader",
 	desc = "PLACEHOLDER. 170mm Breech Autoloader. Absolutely massive breechloading cannon perfect for tank destroyers looking to rip apart armor without spaghettifying your loader's arms.",
 	model = "models/tankgun_new/tankgun_170mm.mdl",
 	sound = "ace_weapons/multi_sound/120mm_multi.mp3",
