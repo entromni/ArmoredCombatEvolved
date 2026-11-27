@@ -613,11 +613,28 @@ end
 ------------------------------------------------------------------------]]
 function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2 )
 
+	-- keyframe_rope can fail to resolve offsets on parented entities after
+	-- their physics object is rebuilt. Bind a parented endpoint to its parent
+	-- instead, converting the actual endpoint through world space.
+	local OriginalEnt1, OriginalEnt2 = Ent1, Ent2
+
+	local function ResolveEndpoint( Ent, LocalPos )
+		local Parent = Ent:GetParent()
+		if not IsValid( Parent ) then return Ent, LocalPos end
+
+		local WorldPos = Ent:LocalToWorld( LocalPos )
+		return Parent, Parent:WorldToLocal( WorldPos )
+	end
+
+	Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1 )
+	Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2 )
+
 	local rope = ents.Create( "keyframe_rope" )
+	if not IsValid( rope ) then return end
+
 	rope:SetPos( Pos )
 	rope:SetKeyValue( "Width", 1 )
 	rope:SetKeyValue( "Type", 2 )
-
 	rope:SetKeyValue( "RopeMaterial", "cable/cable2" )
 
 	-- Attachment point 1
@@ -633,9 +650,11 @@ function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2 )
 	rope:Spawn()
 	rope:Activate()
 
-	-- Delete the rope if the attachments get killed
-	Ent1:DeleteOnRemove( rope )
-	Ent2:DeleteOnRemove( rope )
+	-- Remove the rope when either original endpoint or its parent is removed.
+	OriginalEnt1:DeleteOnRemove( rope )
+	OriginalEnt2:DeleteOnRemove( rope )
+	if Ent1 ~= OriginalEnt1 then Ent1:DeleteOnRemove( rope ) end
+	if Ent2 ~= OriginalEnt2 then Ent2:DeleteOnRemove( rope ) end
 
 	return rope
 
