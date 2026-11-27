@@ -465,7 +465,7 @@ ACE.GSounds.GunFire     = GSoundData
 function ACE.GetGunCaliberBounds(GunClass)
 	local Minimum, Maximum
 	for _, Definition in pairs(GunTable) do
-		if Definition.gunclass == GunClass and not Definition.rack and isnumber(Definition.caliber) then
+		if Definition.gunclass == GunClass and not Definition.rack and not Definition.ACE_CustomPreset and isnumber(Definition.caliber) then
 			Minimum = not Minimum and Definition.caliber or math.min(Minimum, Definition.caliber)
 			Maximum = not Maximum and Definition.caliber or math.max(Maximum, Definition.caliber)
 		end
@@ -481,7 +481,7 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber)
 
 	local Anchors = {}
 	for _, Definition in pairs(GunTable) do
-		if Definition.gunclass == Base.gunclass and not Definition.rack and isnumber(Definition.caliber) then
+		if Definition.gunclass == Base.gunclass and not Definition.rack and not Definition.ACE_CustomPreset and isnumber(Definition.caliber) then
 			Anchors[#Anchors + 1] = Definition
 		end
 	end
@@ -519,11 +519,21 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber)
 	InterpolateTable(Result, Lower, Upper)
 
 	Result.caliber = Caliber
-	Result.id = Lower.id
-	if Result.round then Result.round.id = Lower.id end
-	Result.name = string.format("%.1fmm Custom %s", Caliber * 10, Base.gunclass)
 	Result.model = Lower.model
-	return Result, Caliber / Lower.caliber, Lower.id
+	Result.ACE_CustomPreset = true
+
+	-- A deterministic ID makes the custom gun and its ammo crate match on the
+	-- server and on clients that reconstruct the definition from networked data.
+	local ClassID = string.gsub(string.upper(Base.gunclass), "[^%w]", "")
+	local CaliberKey = math.Round(Caliber * 1000) -- 0.01 mm precision
+	local CustomID = string.format("ACE_Custom_%s_%d", ClassID, CaliberKey)
+	Result.id = CustomID
+	if Result.round then Result.round.id = CustomID end
+	Result.name = string.format("%.1fmm Custom %s", Caliber * 10, Base.gunclass)
+
+	GunTable[CustomID] = Result
+
+	return Result, Caliber / Lower.caliber, CustomID
 end
 
 -- Keep the cannon-named functions as compatibility wrappers for existing code.
