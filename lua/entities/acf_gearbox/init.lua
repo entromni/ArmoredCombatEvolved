@@ -477,9 +477,14 @@ function ENT:Update( ArgsTable )
 		self:SetNWFloat("ACE_ModelScale", NewScale)
 		self.In, self.OutL, self.OutR = NewIn, NewOutL, NewOutR
 
-		-- Refresh the existing logical links and their keyframe-rope visuals
-		-- synchronously, using the now-valid local attachment vectors.
+		-- PhysicsInit replaces the gearbox PhysObj. Recreating keyframe ropes
+		-- synchronously in the same update can bind their endpoints while the
+		-- entity/physics transforms are still transitioning; the ropes then
+		-- resolve one or both attachments to world origin. Remove the old
+		-- visuals now, and recreate them on the next timer tick.
 		self.ACE_LinkRefreshPending = true
+		self.ACE_LinkRefreshToken = (self.ACE_LinkRefreshToken or 0) + 1
+		local RefreshToken = self.ACE_LinkRefreshToken
 
 		for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
 			for _, Link in pairs(Source.WheelLink or {}) do
@@ -497,49 +502,52 @@ function ENT:Update( ArgsTable )
 			end
 		end
 
-		for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
-			for _, Link in pairs(Source.WheelLink or {}) do
-				local Target = Link.Ent
-				if not IsValid(Target) then continue end
-				if Source ~= self and Target ~= self then continue end
+		timer.Simple(0, function()
+			if not IsValid(self) or self.ACE_LinkRefreshToken ~= RefreshToken then return end
 
-				local In = Target.IsGeartrain and Target.In or vector_origin
-				local InWorld = Target:LocalToWorld(In)
-				local Out = Link.Output
+			for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
+				for _, Link in pairs(Source.WheelLink or {}) do
+					local Target = Link.Ent
+					if not IsValid(Target) then continue end
+					if Source ~= self and Target ~= self then continue end
 
-				if Source == self then
-					local Side = Source:WorldToLocal(InWorld).y < 0 and 0 or 1
+					local In = Target.IsGeartrain and Target.In or vector_origin
+					local InWorld = Target:LocalToWorld(In)
+					local Out = Link.Output
+
+					if Source == self then
+						local Side = Source:WorldToLocal(InWorld).y < 0 and 0 or 1
 					Link.Side = Side
 					Out = Side == 0 and self.OutL or self.OutR
 					Link.Output = Out
 				end
 
-				if not isvector(Out) then continue end
+					if not isvector(Out) then continue end
 
-				local OutWorld = Source:LocalToWorld(Out)
-				Link.RopeLen = OutWorld:Distance(InWorld)
+					local OutWorld = Source:LocalToWorld(Out)
+					Link.RopeLen = OutWorld:Distance(InWorld)
 
-				if Target == self then
-					local Phys = Target:GetPhysicsObject()
+					if Target == self then
+						local Phys = Target:GetPhysicsObject()
 					if IsValid(Phys) then
 						local Axis = Phys:WorldToLocalVector(Source:GetRight())
 					Link.Axis = Axis
 					Link.Inertia = (Axis * Phys:GetInertia()):Length()
-					Link.RopeLen = OutWorld:Distance(InWorld)
+					end
+					end
+
+					local Owner = Source:CPPIGetOwner()
+					local MakeRopes = IsValid(Owner)
+						and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
+
+					if MakeRopes then
+						Link.Rope = ACE_CreateLinkRope(OutWorld, Source, Out, Target, In)
 					end
 				end
-
-				local Owner = Source:CPPIGetOwner()
-				local MakeRopes = IsValid(Owner)
-					and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
-
-				if MakeRopes then
-					Link.Rope = ACE_CreateLinkRope(OutWorld, Source, Out, Target, In)
-				end
 			end
-		end
 
-		self.ACE_LinkRefreshPending = false
+			self.ACE_LinkRefreshPending = false
+		end)
 	end
 	-- Weight can change even if the selected size resolves to the same model
 	-- scale, so refresh mass/inertia on every update.
