@@ -14,6 +14,7 @@ ACE.DefineGunClass("FGL", {
 
 --add a gun to the class
 ACE.DefineGun("40mmFGL", { --id
+	subclass = "Pod Flare Launcher",
 	name = "40mm Flare Launcher",
 	desc = "Put on an all-American fireworks show with this flare launcher: high fire rate, low distraction rate.  Fill the air with flare.  Careful of your reload time.",
 	model = "models/missiles/blackjellypod.mdl",
@@ -33,6 +34,7 @@ ACE.DefineGun("40mmFGL", { --id
 
 --add a gun to the class
 ACE.DefineGun("60mmFGL", { --id
+	subclass = "Heavy Flare Launcher",
 	name = "60mm Flare Launcher",
 	desc = "Large countermeasure shooting out heavy flares. Has fewer shots than the its 40mm counterpart but reloads faster and is much better for distracting.",
 	model = "models/launcher/40mmgl.mdl",

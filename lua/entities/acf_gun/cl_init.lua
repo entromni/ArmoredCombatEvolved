@@ -35,9 +35,48 @@ function ENT:Draw()
 
 end
 
+-- Applies custom caliber collision and visuals. Checked from Think so it also
+-- covers late joiners and a client physics object that has been lost.
+local function UpdateCaliberScale(Gun)
+	local Scale = Gun:GetNWFloat("ACE_ModelScale", 1)
+	if Scale == 1 then return end
+	if Gun.ACE_AppliedScale == Scale and IsValid(Gun:GetPhysicsObject()) then return end
+	if not Gun:ACE_ApplyScaledCollision(Scale) then return end
+
+	local Phys = Gun:GetPhysicsObject()
+	Phys:EnableMotion(false)
+	Phys:Sleep()
+
+	local Mat = Matrix()
+	Mat:Scale(Vector(Scale, Scale, Scale))
+	Gun:EnableMatrix("RenderMultiply", Mat)
+	Gun:SetRenderBounds(Gun:GetCollisionBounds())
+	Gun:DrawShadow(false)
+
+	Gun.ACE_AppliedScale = Scale
+end
+
+-- The client physics object does not follow the entity by itself (same approach
+-- as ace_scalability). Unscaled guns return nothing and keep default behaviour.
+function ENT:CalcAbsolutePosition(Position, Angles)
+	if not self.ACE_AppliedScale then return end
+
+	local Phys = self:GetPhysicsObject()
+	if IsValid(Phys) then
+		Phys:SetPos(self:GetPos())
+		Phys:SetAngles(self:GetAngles())
+		Phys:EnableMotion(false)
+		Phys:Sleep()
+	end
+
+	return Position, Angles
+end
+
 function ENT:Think()
 
 	self.BaseClass.Think( self )
+
+	UpdateCaliberScale( self )
 
 	local SinceFire = CurTime() - self.LastFire
 	self:SetCycle( math.min( SinceFire * self.Rate / self.RateScale, 1 ) )
@@ -94,6 +133,67 @@ function ACE_GunGUICreate( Table )
 	GunDisplay:SetSize(acemenupanel:GetWide(),acemenupanel:GetWide())
 	GunDisplay.LayoutEntity = function() end
 	acemenupanel.CustomDisplay:AddItem( GunDisplay )
+
+	-- Subclass selector: only show it when this class has multiple variants.
+	local Subclasses = ACE.GetGunSubclasses and ACE.GetGunSubclasses(Table.gunclass) or {}
+	local SelectedSubclass = Table.subclass or "Standard"
+	if #Subclasses > 1 then
+		local SubclassCombo = vgui.Create("DComboBox", acemenupanel.CustomDisplay)
+		SubclassCombo:SetValue(SelectedSubclass)
+		SubclassCombo:SetSize(acemenupanel.CustomDisplay:GetWide(), 28)
+		for _, Name in ipairs(Subclasses) do SubclassCombo:AddChoice(Name) end
+		SubclassCombo.OnSelect = function(_, _, Name)
+			if Name == SelectedSubclass then return end
+			local Preset = ACE.GetGunSubclassPreset(Table.gunclass, Name, Table.caliber)
+			if not Preset then return end
+			RunConsoleCommand("acemenu_subclass", Name)
+			RunConsoleCommand("acemenu_id", Preset.id)
+			RunConsoleCommand("acemenu_caliber", "0")
+			acemenupanel:UpdateDisplay(Preset)
+		end
+		acemenupanel.CustomDisplay:AddItem(SubclassCombo)
+	end
+
+	-- Slider bounds and interpolation are scoped to the selected subclass.
+	if not Table.rack and isnumber(Table.caliber) then
+		local Minimum, Maximum = ACE.GetGunCaliberBounds(Table.gunclass, SelectedSubclass)
+		if Minimum and Maximum and Minimum > 0 and Maximum >= Minimum then
+			local PreviewLabel = vgui.Create("DLabel", acemenupanel.CustomDisplay)
+			PreviewLabel:SetDark(true)
+			PreviewLabel:SetWrap(true)
+			PreviewLabel:SetAutoStretchVertical(true)
+			PreviewLabel:SetSize(acemenupanel.CustomDisplay:GetWide(), 42)
+
+			local CaliberSlider = vgui.Create("DNumSlider", acemenupanel.CustomDisplay)
+			CaliberSlider:SetText("Continuous caliber (mm)")
+			CaliberSlider:SetMin(Minimum * 10)
+			CaliberSlider:SetMax(Maximum * 10)
+			CaliberSlider:SetDecimals(1)
+			CaliberSlider:SetSize(acemenupanel.CustomDisplay:GetWide(), 35)
+			CaliberSlider.OnValueChanged = function(_, Millimeters)
+				Millimeters = math.Clamp(Millimeters, Minimum * 10, Maximum * 10)
+				RunConsoleCommand("acemenu_caliber", string.format("%.1f", Millimeters))
+				RunConsoleCommand("acemenu_subclass", SelectedSubclass)
+				local Preview, ModelScale = ACE.InterpolateGunPreset(Table.id, Millimeters / 10, SelectedSubclass)
+				if not Preview then return end
+				PreviewLabel:SetText(string.format(
+					"Preview: %.1fmm | %.1fkg | %s",
+					Preview.caliber * 10, Preview.weight or 0, Preview.name or Table.name
+				))
+				if IsValid(GunDisplay.Entity) then
+					GunDisplay:SetModel(Preview.model)
+					if IsValid(GunDisplay.Entity) then GunDisplay.Entity:SetModelScale(ModelScale, 0) end
+				end
+			end
+			acemenupanel.CustomDisplay:AddItem(CaliberSlider)
+			acemenupanel.CustomDisplay:AddItem(PreviewLabel)
+			CaliberSlider:SetValue(Table.caliber * 10)
+		else
+			RunConsoleCommand("acemenu_caliber", "0")
+		end
+	else
+		RunConsoleCommand("acemenu_caliber", "0")
+	end
 
 	local GunClass = ACE.Classes.GunClass[Table.gunclass]
 	acemenupanel:CPanelText("ClassDesc", GunClass.desc)

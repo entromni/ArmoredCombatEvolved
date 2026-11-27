@@ -14,6 +14,7 @@ ACE.DefineGunClass("SL", {
 --add a gun to the class
 ACE.DefineGun("40mmSL", { --id
 	name		= "40mm Smoke Launcher",
+	subclass = "Smoke Launcher",
 	desc		= "",
 	model		= "models/launcher/40mmsl.mdl",
 	sound		= "ace_weapons/multi_sound/smoke_multi.mp3",
@@ -31,6 +32,7 @@ ACE.DefineGun("40mmSL", { --id
 
 ACE.DefineGun("20mmSL", { --id
 	name		= "20mm Smoke Launcher",
+	subclass = "Smoke Launcher",
 	desc		= "",
 	model		= "models/launcher/20mmsl.mdl",
 	sound		= "ace_weapons/multi_sound/smoke_multi.mp3",
@@ -48,6 +50,7 @@ ACE.DefineGun("20mmSL", { --id
 
 ACE.DefineGun("40mmCL", { --id
 	name		= "40mm Countermeasure Launcher",
+	subclass = "Countermeasure Launcher",
 	desc		= "A revolver-style launcher capable of firing off several smoke or flare rounds.",
 	model		= "models/launcher/40mmgl.mdl",
 	sound		= "ace_weapons/multi_sound/smoke_multi.mp3",

@@ -201,16 +201,38 @@ do
 		HMG = true
 	}
 
-	function ACE_MakeGun(Owner, Pos, Angle, Id)
+	function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId, Subclass)
 
 		local Gun = ents.Create("acf_gun")
 		if not IsValid(Gun) then return false end
 
-		if not ACE_CheckGun( Id ) then
+		-- Custom caliber variants store their stock anchor ID for duplicator recovery.
+		-- Prefer that ID if the generated custom ID is not registered after a restart.
+		if BaseId and GunTable[BaseId] then
+			Id = BaseId
+		elseif not ACE_CheckGun(Id) then
 			Id = BackComp[Id] or "100mmC"
 		end
 
-		local Lookup	= GunTable[Id]
+		local Lookup = GunTable[Id]
+		local ModelScale = 1
+		local RequestedCaliber = tonumber(Caliber)
+		Subclass = Subclass and Subclass ~= "" and Subclass or Lookup.subclass or "Standard"
+
+		-- Resolve the selected subclass to one of its own preset definitions.
+		if not Lookup.rack and not Lookup.ACE_CustomPreset then
+			local SubclassPreset = ACE.GetGunSubclassPreset(Lookup.gunclass, Subclass, Lookup.caliber)
+			if SubclassPreset then
+				Id = SubclassPreset.id
+				Lookup = SubclassPreset
+			end
+		end
+		local CustomBaseID = Id
+
+		-- Menu CVar is millimeters; ACE gun definitions use centimeters.
+		if not Lookup.rack and RequestedCaliber and RequestedCaliber > 0 then
+			Lookup, ModelScale, Id = ACE.InterpolateGunPreset(Id, RequestedCaliber / 10, Subclass)
+		end
 		local ClassData = GunClasses[Lookup.gunclass]
 
 		if Lookup.gunclass == "SL" then
@@ -234,7 +256,13 @@ do
 		Gun:SetPos(Pos)
 		Gun:Spawn()
 		Gun:CPPISetOwner(Owner)
-		Gun.Id              = Id
+		-- A custom gun keeps its own ID so only ammo of the same size can link.
+		Gun.Id               = Id
+		Gun.ACE_CustomGunID   = Lookup.ACE_CustomPreset and Id or nil
+		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or ""
+		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or 0
+		Gun.ACE_DupeCaliber = Lookup.ACE_CustomPreset and (Lookup.caliber * 10) or 0
+		Gun.ACE_CustomSubclass = Subclass
 		Gun.Caliber         = Lookup.caliber
 		Gun.Model           = Lookup.model
 		Gun.Mass            = Lookup.weight
@@ -309,18 +337,34 @@ do
 		Gun:SetNWString( "WireName", Lookup.name )
 		Gun:SetNWString( "Class", Gun.Class )
 		Gun:SetNWString( "ID", Gun.Id )
+		Gun:SetNWString( "ACE_CustomGunID", Gun.ACE_CustomGunID or "" )
+		Gun:SetNWString( "ACE_CustomBaseID", Gun.ACE_CustomBaseID or "" )
+		Gun:SetNWFloat( "ACE_CustomCaliber", Gun.ACE_CustomCaliber or 0 )
+		Gun:SetNWString( "ACE_CustomSubclass", Gun.ACE_CustomSubclass or "Standard" )
 		Gun:SetNWString( "Muzzleflash", Gun.Muzzleflash )
 		Gun:SetNWString( "Sound", Gun.Sound )
 		Gun:SetNWInt( "SoundPitch", Gun.SoundPitch )
 
-		Gun:SetModel( Gun.Model )
+		Gun:SetModel(Gun.Model)
+		Gun:PhysicsInit(SOLID_VPHYSICS)
 
-		Gun:PhysicsInit( SOLID_VPHYSICS )
 		Gun:SetMoveType( MOVETYPE_VPHYSICS )
 		Gun:SetSolid( SOLID_VPHYSICS )
 
+		-- Never SetModelScale: it broke client traces. Scale the collision mesh here;
+		-- the client does the same and scales the visuals (see cl_init.lua).
+		Gun.CannonCaliberScale = 1
+		if ModelScale ~= 1 then
+			if Gun:ACE_ApplyScaledCollision(ModelScale) then
+				Gun.CannonCaliberScale = ModelScale
+				Gun:SetNWFloat( "ACE_ModelScale", ModelScale )
+			else
+				ErrorNoHalt("ACE: could not scale gun collision for " .. Gun.Model .. "\n")
+			end
+		end
+
 		local Muzzle = Gun:GetAttachment( Gun:LookupAttachment( "muzzle" ) )
-		Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos)
+		Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos) * Gun.CannonCaliberScale
 
 		local longbarrel = ClassData.longbarrel
 		if longbarrel ~= nil then
@@ -328,15 +372,9 @@ do
 				if not IsValid(Gun) then return end
 				if Gun:GetBodygroup( longbarrel.index ) == longbarrel.submodel then
 					local Muzzle = Gun:GetAttachment( Gun:LookupAttachment( longbarrel.newpos ) )
-					Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos)
+					Gun.Muzzle = Gun:WorldToLocal(Muzzle.Pos) * Gun.CannonCaliberScale
 				end
 			end)
-		end
-
-		local phys = Gun:GetPhysicsObject()
-		if IsValid( phys ) then
-			phys:SetMass( Gun.Mass )
-			Gun.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass() -- giving a little wiggle room
 		end
 
 		Gun:UpdateOverlayText()
@@ -345,13 +383,35 @@ do
 
 		ACE_Activate(Gun, 0)
 
+		-- Activation can recreate the physics object. Set final mass/inertia
+		-- after it, so the frozen toolgun spawn retains valid physics.
+		local phys = Gun:GetPhysicsObject()
+		if IsValid(phys) then
+			phys:SetMass(Gun.Mass)
+			Gun.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass()
+		end
+
 		return Gun
 
 	end
 end
 
-list.Set( "ACFCvars", "acf_gun", {"id"} )
-duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id")
+-- Called by the ACE tool after Entity:Activate(), which can rebuild scaled VPhysics.
+function ENT:ACE_FinalizeCustomCaliberPhysics()
+	local phys = self:GetPhysicsObject()
+	if not IsValid(phys) then return false end
+
+	if self.Mass and self.Mass > 0 then phys:SetMass(self.Mass) end
+	if phys:GetMass() > 0 then
+		self.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass()
+	end
+
+	return true
+end
+
+-- Include continuous caliber in tool updates and duplicator arguments.
+list.Set( "ACFCvars", "acf_gun", {"id", "caliber", "baseid", "subclass"} )
+duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id", "ACE_DupeCaliber", "ACE_CustomBaseID", "ACE_CustomSubclass")
 
 function ENT:UpdateOverlayText()
 
@@ -601,10 +661,10 @@ function ENT:CanProperty( _, property )
 			timer.Simple(0.25, function() --need to wait until after the property is actually set
 				if self:GetBodygroup( longbarrel.index ) == longbarrel.submodel then
 					local Muzzle = self:GetAttachment( self:LookupAttachment( longbarrel.newpos ) )
-					self.Muzzle = self:WorldToLocal(Muzzle.Pos)
+					self.Muzzle = self:WorldToLocal(Muzzle.Pos) * (self.CannonCaliberScale or 1)
 				else
 					local Muzzle = self:GetAttachment( self:LookupAttachment( "muzzle" ) )
-					self.Muzzle = self:WorldToLocal(Muzzle.Pos)
+					self.Muzzle = self:WorldToLocal(Muzzle.Pos) * (self.CannonCaliberScale or 1)
 				end
 			end)
 		end

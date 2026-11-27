@@ -129,23 +129,33 @@ function PANEL:Init( )
 
 	local Guns = HomeNode:AddNode( "Guns" , "icon16/attach.png" ) --Guns folder
 
-	for _,Class in pairs(self.GunClasses["GunClass"]) do
-
-		local SubNode = Guns:AddNode( Class.name or "No Name" , ItemIcon )
-
-		for _, Ent in pairs(FinalContainer["Guns"]) do
-			if Ent.gunclass == Class.id then
-
-				local EndNode = SubNode:AddNode( Ent.name or "No Name")
-				EndNode.mytable = Ent
-
-				function EndNode:DoClick()
-					RunConsoleCommand( "acemenu_type", self.mytable.type )
-					acemenupanel:UpdateDisplay( self.mytable )
-				end
-
-				EndNode.Icon:SetImage( "icon16/newspaper.png" )
+	-- Guns now stop at the gun-class node. Clicking a class opens its default
+	-- definition directly in the information panel (including class-specific
+	-- controls such as the continuous cannon caliber slider), instead of nesting
+	-- every individual preset under the class.
+	for _, Class in ipairs(self.GunClasses["GunClass"]) do
+		local DefaultDefinition
+		for _, Ent in ipairs(FinalContainer["Guns"]) do
+			if Ent.gunclass == Class.id and not Ent.ACE_CustomPreset then
+				DefaultDefinition = Ent
+				break
 			end
+		end
+
+		if DefaultDefinition then
+			local ClassNode = Guns:AddNode(Class.name or Class.id, ItemIcon)
+			ClassNode.mytable = DefaultDefinition
+
+			function ClassNode:DoClick()
+				local Definition = self.mytable
+				RunConsoleCommand("acemenu_type", Definition.type)
+				RunConsoleCommand("acemenu_id", Definition.id)
+				RunConsoleCommand("acemenu_subclass", Definition.subclass or "Standard")
+				RunConsoleCommand("acemenu_caliber", "0")
+				acemenupanel:UpdateDisplay(Definition)
+			end
+
+			ClassNode.Icon:SetImage(ItemIcon2)
 		end
 	end
 
@@ -1280,6 +1290,8 @@ do
 	acemenupanel.CData.ClassSelect:SetText( acemenupanel.AmmoData["Classname"] .. (not DComboList[acemenupanel.AmmoData["ClassData"]] and " - update caliber!" or "" ))
 	acemenupanel.CData.ClassSelect:SetColor( not DComboList[acemenupanel.AmmoData["ClassData"]] and Color(255,0,0) or Color(0,0,0) )
 
+	local RefreshCaliberControls -- Assigned once the caliber widgets exist
+
 	acemenupanel.CData.ClassSelect.OnSelect = function( _ , index , data )
 
 		data = acemenupanel.CData.ClassSelect:GetOptionData(index) -- Why?
@@ -1293,11 +1305,13 @@ do
 
 		for Key, Value in pairs( ACFEnts.Guns ) do
 
-			if acemenupanel.AmmoData["ClassData"] == Value.gunclass then
+			if acemenupanel.AmmoData["ClassData"] == Value.gunclass and not Value.ACE_CustomPreset then
 			acemenupanel.CData.CaliberSelect:AddChoice( Value.id , Key )
 			end
 
 		end
+
+		RefreshCaliberControls( true )
 
 		MainPanel:UpdateAttribs()
 		MainPanel:UpdateAttribs() --Note : this is intentional
@@ -1316,7 +1330,7 @@ do
 
 	for Key, Value in pairs( ACFEnts.Guns ) do
 
-		if acemenupanel.AmmoData["ClassData"] == Value.gunclass then
+		if acemenupanel.AmmoData["ClassData"] == Value.gunclass and not Value.ACE_CustomPreset then
 			acemenupanel.CData.CaliberSelect:AddChoice( Value.id , Key )
 		end
 
@@ -1331,6 +1345,108 @@ do
 	end
 
 	acemenupanel.CustomDisplay:AddItem( acemenupanel.CData.CaliberSelect )
+
+	--===========================================================================================
+	-----Continuous caliber controls (guns only; missiles keep the dropdown above)
+	--===========================================================================================
+
+	local SubclassSelect = vgui.Create( "DComboBox", acemenupanel.CustomDisplay )
+	SubclassSelect:SetSize(100, 30)
+	acemenupanel.CustomDisplay:AddItem( SubclassSelect )
+
+	local CaliberSlider = vgui.Create( "DNumSlider", acemenupanel.CustomDisplay )
+	CaliberSlider:SetText( "Gun caliber (mm)" )
+	CaliberSlider:SetDark( true )
+	CaliberSlider:SetDecimals( 1 )
+	CaliberSlider:SetTall( 35 )
+	acemenupanel.CustomDisplay:AddItem( CaliberSlider )
+
+	local SelectedLabel = vgui.Create( "DLabel" )
+	SelectedLabel:SetDark( true )
+	acemenupanel.CustomDisplay:AddItem( SelectedLabel )
+
+	local Subclass, PresetID
+	local Updating = false
+
+	-- Notify is false while the round menu is still being built, since its sliders
+	-- don't exist yet and UpdateAttribs can't run.
+	local function SelectCaliber( Millimeters, Notify, Force )
+		local Definition, _, ID = ACE.InterpolateGunPreset(PresetID, Millimeters / 10, Subclass)
+		if not Definition then return end
+
+		SelectedLabel:SetText("Ammo for: " .. Definition.name)
+
+		local Combo = acemenupanel.CData.CaliberSelect
+		Combo:SetText( ID )
+
+		if not Notify then
+			acemenupanel.AmmoData["Data"] = Definition.round
+		elseif Force or acemenupanel.AmmoData["Data"]["id"] ~= ID then
+			-- Reuse the dropdown handler, which the missile menu also hooks.
+			Combo.OnSelect( Combo, nil, ID )
+		end
+	end
+
+	local function ShowSubclass( Name, NearCaliber, Notify )
+		local ClassID = acemenupanel.AmmoData["ClassData"]
+		local Minimum, Maximum = ACE.GetGunCaliberBounds(ClassID, Name)
+		local Preset = ACE.GetGunSubclassPreset(ClassID, Name, NearCaliber)
+		if not Preset then return end
+
+		Subclass, PresetID = Name, Preset.id
+		local Millimeters = math.Clamp(NearCaliber, Minimum, Maximum) * 10
+
+		Updating = true
+		SubclassSelect:SetValue( Name )
+		CaliberSlider:SetMin( Minimum * 10 )
+		CaliberSlider:SetMax( Maximum * 10 )
+		CaliberSlider:SetValue( Millimeters )
+		Updating = false
+
+		SelectCaliber( Millimeters, Notify, true )
+	end
+
+	RefreshCaliberControls = function( Notify )
+		local ClassID = acemenupanel.AmmoData["ClassData"]
+		local ClassData = Classes.GunClass[ClassID]
+		local UseSlider = DComboList[ClassID] and ClassData.type ~= "missile" or false
+
+		local Current = ACE.Weapons.Guns[acemenupanel.AmmoData["Data"]["id"]]
+		local Subclasses = UseSlider and ACE.GetGunSubclasses(ClassID) or {}
+		UseSlider = UseSlider and #Subclasses > 0
+
+		acemenupanel.CData.CaliberSelect:SetVisible( not UseSlider )
+		SubclassSelect:SetVisible( UseSlider and #Subclasses > 1 )
+		CaliberSlider:SetVisible( UseSlider )
+		SelectedLabel:SetVisible( UseSlider )
+		acemenupanel.CustomDisplay:Rebuild()
+		acemenupanel.CustomDisplay:InvalidateLayout()
+
+		if not UseSlider then return end
+
+		SubclassSelect:Clear()
+		for _, Name in ipairs(Subclasses) do SubclassSelect:AddChoice( Name ) end
+
+		-- Keep the current size when possible, including across class changes.
+		local Name = Subclasses[1]
+		if Current and Current.gunclass == ClassID then Name = Current.subclass or "Standard" end
+
+		ShowSubclass( Name, Current and Current.caliber or 0, Notify )
+	end
+
+	SubclassSelect.OnSelect = function( _, _, Name )
+		if Updating or Name == Subclass then return end
+		local Current = ACE.Weapons.Guns[acemenupanel.AmmoData["Data"]["id"]]
+		ShowSubclass( Name, Current and Current.caliber or 0, true )
+	end
+
+	CaliberSlider.OnValueChanged = function( _, Millimeters )
+		if Updating then return end
+		-- Round like the gun menu does before sending the value to the server.
+		SelectCaliber( tonumber(string.format("%.1f", Millimeters)), true )
+	end
+
+	RefreshCaliberControls( false )
 
 	end
 end
