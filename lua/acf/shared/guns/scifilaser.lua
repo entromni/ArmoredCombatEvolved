@@ -6,7 +6,7 @@ ACE.DefineGunClass("SL", {
 	muzzleflash = "SL",
 	rofmod = 0.08,
 	maxrof = 600,
-	sound = "",
+	sound = "acf_extra/tankfx/energy/laser-automatic.wav",
 	noloader = true,
 })
 
