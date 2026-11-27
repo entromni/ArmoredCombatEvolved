@@ -460,10 +460,12 @@ ACE.Weapons.Mobility    = MobilityTable
 ACE.GSounds.GunFire     = GSoundData
 -- Continuous cannon caliber support. Added for the preset-interpolation size menu.
 -- Existing definitions remain untouched and act as exact interpolation anchors.
-function ACE.GetCannonCaliberBounds()
+-- Continuous caliber support for all ordinary gun classes.
+-- Preset definitions remain exact anchors; interpolate only within the selected gun class.
+function ACE.GetGunCaliberBounds(GunClass)
 	local Minimum, Maximum
 	for _, Definition in pairs(GunTable) do
-		if Definition.gunclass == "C" and isnumber(Definition.caliber) then
+		if Definition.gunclass == GunClass and not Definition.rack and isnumber(Definition.caliber) then
 			Minimum = not Minimum and Definition.caliber or math.min(Minimum, Definition.caliber)
 			Maximum = not Maximum and Definition.caliber or math.max(Maximum, Definition.caliber)
 		end
@@ -471,15 +473,17 @@ function ACE.GetCannonCaliberBounds()
 	return Minimum, Maximum
 end
 
-function ACE.InterpolateCannonPreset(DefinitionID, Caliber)
+function ACE.InterpolateGunPreset(DefinitionID, Caliber)
 	local Base = GunTable[DefinitionID]
-	if not Base or Base.gunclass ~= "C" then return Base, 1, DefinitionID end
+	if not Base or Base.rack or not isnumber(Base.caliber) then return Base, 1, DefinitionID end
 	Caliber = tonumber(Caliber)
 	if not Caliber then return Base, 1, DefinitionID end
 
 	local Anchors = {}
 	for _, Definition in pairs(GunTable) do
-		if Definition.gunclass == "C" and isnumber(Definition.caliber) then Anchors[#Anchors + 1] = Definition end
+		if Definition.gunclass == Base.gunclass and not Definition.rack and isnumber(Definition.caliber) then
+			Anchors[#Anchors + 1] = Definition
+		end
 	end
 	table.sort(Anchors, function(A, B) return A.caliber < B.caliber end)
 	if #Anchors == 0 then return Base, 1, DefinitionID end
@@ -517,10 +521,18 @@ function ACE.InterpolateCannonPreset(DefinitionID, Caliber)
 	Result.caliber = Caliber
 	Result.id = Lower.id
 	if Result.round then Result.round.id = Lower.id end
-	Result.name = string.format("%.1fmm Custom Cannon", Caliber * 10)
+	Result.name = string.format("%.1fmm Custom %s", Caliber * 10, Base.gunclass)
 	Result.model = Lower.model
-	-- The lower anchor model is scaled between presets; exact presets keep their original model.
 	return Result, Caliber / Lower.caliber, Lower.id
+end
+
+-- Keep the cannon-named functions as compatibility wrappers for existing code.
+function ACE.GetCannonCaliberBounds()
+	return ACE.GetGunCaliberBounds("C")
+end
+
+function ACE.InterpolateCannonPreset(DefinitionID, Caliber)
+	return ACE.InterpolateGunPreset(DefinitionID, Caliber)
 end
 
 ACE.ModelData           = ModelData
