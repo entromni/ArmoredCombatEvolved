@@ -1182,14 +1182,7 @@ function ENT:PostEntityPaste( Player, Ent, CreatedEntities )
 	if Ent.EntityMods and Ent.EntityMods.WheelLink and Ent.EntityMods.WheelLink.entities then
 		local WheelLink = Ent.EntityMods.WheelLink
 		if WheelLink.entities and next( WheelLink.entities ) then
-			-- Dupe restoration applies entity parenting after PostEntityPaste.
-			-- Delay rebuilding gearbox links until the pasted parent hierarchy
-			-- has been restored, otherwise ACE_CreateLinkRope can capture the
-			-- child endpoint as unparented and its offset becomes invalid once
-			-- the parent is applied.
-			timer.Simple( 0.1, function()
-				if not IsValid( self ) then return end
-
+			timer.Simple( 0, function() -- workaround for an AdvDupe2 parenting/restoration ordering issue
 				for _, ID in pairs( WheelLink.entities ) do
 					local Linked = CreatedEntities[ ID ]
 					if IsValid( Linked ) then
