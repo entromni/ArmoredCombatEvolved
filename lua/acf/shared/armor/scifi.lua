@@ -76,7 +76,7 @@ Graphene.id = "Graph"
 Graphene.name = "Graphene Composite"
 Graphene.sname = "Graphene"
 Graphene.desc = "Advanced layered graphene composite. High kinetic resistance for its density, but brittle and costly. Ballistic performance is a science-fiction extrapolation."
-Graphene.year = 2025
+Graphene.year = 2023
 
 -- Graphite/graphene bulk density: 2.26 g/cm^3; RHA reference: 7.85 g/cm^3.
 Graphene.massMod = 2.26 / 7.85
@@ -109,7 +109,7 @@ Aerogel.id = "Aero"
 Aerogel.name = "Silica Aerogel Composite"
 Aerogel.sname = "Aerogel"
 Aerogel.desc = "Ultra-light silica aerogel composite with excellent thermal insulation, but very poor ballistic strength. Thermal insulation does not equal shaped-charge jet resistance."
-Aerogel.year = 2025
+Aerogel.year = 2023
 
 -- NASA Ames lists 100 kg/m^3 as a typical silica-aerogel density.
 Aerogel.massMod = 100 / 7850
@@ -143,7 +143,7 @@ Diamond.id = "Diam"
 Diamond.name = "Diamond Composite"
 Diamond.sname = "Diamond"
 Diamond.desc = "Ultra-hard diamond-based composite. Excellent kinetic resistance, but extremely brittle and vulnerable to damage after penetration."
-Diamond.year = 2025
+Diamond.year = 2023
 
 -- Diamond density: 3.51 g/cm^3; RHA reference: 7.85 g/cm^3.
 Diamond.massMod = 3.51 / 7.85
