@@ -427,18 +427,35 @@ function ENT:Update( ArgsTable )
 					if not IsValid(Target) then continue end
 					if Source ~= Gearbox and Target ~= Gearbox then continue end
 
+					local In = Target.IsGeartrain and Target.In or vector_origin
+					if not isvector(In) then continue end
+
+					local InWorld = Target:LocalToWorld(In)
 					local Out = Link.Output
+
 					if Source == Gearbox then
-						Out = Link.Side == 0 and Gearbox.OutL or Gearbox.OutR
+						-- Re-select the output side from the linked entity's current
+						-- position. Saved links can retain the wrong side after a
+						-- model-anchor change or legacy dupe migration.
+						local Side = Source:WorldToLocal(InWorld).y < 0 and 0 or 1
+						Link.Side = Side
+						Out = Side == 0 and Gearbox.OutL or Gearbox.OutR
 						Link.Output = Out
 					end
 
-					local In = Target.IsGeartrain and Target.In or vector_origin
-					if not isvector(Out) or not isvector(In) then continue end
+					if not isvector(Out) then continue end
 
 					local OutWorld = Source:LocalToWorld(Out)
-					local InWorld = Target:LocalToWorld(In)
 					Link.RopeLen = OutWorld:Distance(InWorld)
+
+					-- PhysicsInit replaces the target physics object. Rebuild the
+					-- cached local drivetrain axis and inertia for that new object.
+					local Phys = Target:GetPhysicsObject()
+					if IsValid(Phys) then
+						local Axis = Phys:WorldToLocalVector(Source:GetRight())
+					Link.Axis = Axis
+					Link.Inertia = (Axis * Phys:GetInertia()):Length()
+				end
 
 					local Owner = Source:CPPIGetOwner()
 					local MakeRopes = IsValid(Owner)
