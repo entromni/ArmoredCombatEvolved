@@ -201,19 +201,25 @@ do
 		HMG = true
 	}
 
-	function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber)
+	function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId)
 
 		local Gun = ents.Create("acf_gun")
 		if not IsValid(Gun) then return false end
 
-		if not ACE_CheckGun( Id ) then
+		-- Custom caliber variants store their stock anchor ID for duplicator recovery.
+		-- Prefer that ID if the generated custom ID is not registered after a restart.
+		if BaseId and GunTable[BaseId] then
+			Id = BaseId
+		elseif not ACE_CheckGun(Id) then
 			Id = BackComp[Id] or "100mmC"
 		end
 
 		local Lookup = GunTable[Id]
 		local ModelScale = 1
-		-- Menu CVar is millimeters; ACE gun definitions use centimeters.
 		local RequestedCaliber = tonumber(Caliber)
+		local CustomBaseID = Id
+
+		-- Menu CVar is millimeters; ACE gun definitions use centimeters.
 		if not Lookup.rack and RequestedCaliber and RequestedCaliber > 0 then
 			Lookup, ModelScale, Id = ACE.InterpolateGunPreset(Id, RequestedCaliber / 10)
 		end
@@ -241,6 +247,8 @@ do
 		Gun:Spawn()
 		Gun:CPPISetOwner(Owner)
 		Gun.Id              = Id
+		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or nil
+		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or nil
 		Gun.Caliber         = Lookup.caliber
 		Gun.Model           = Lookup.model
 		Gun.Mass            = Lookup.weight
@@ -315,6 +323,8 @@ do
 		Gun:SetNWString( "WireName", Lookup.name )
 		Gun:SetNWString( "Class", Gun.Class )
 		Gun:SetNWString( "ID", Gun.Id )
+		Gun:SetNWString( "ACE_CustomBaseID", Gun.ACE_CustomBaseID or "" )
+		Gun:SetNWFloat( "ACE_CustomCaliber", Gun.ACE_CustomCaliber or 0 )
 		Gun:SetNWString( "Muzzleflash", Gun.Muzzleflash )
 		Gun:SetNWString( "Sound", Gun.Sound )
 		Gun:SetNWInt( "SoundPitch", Gun.SoundPitch )
@@ -390,8 +400,8 @@ do
 end
 
 -- Include continuous caliber in tool updates and duplicator arguments.
-list.Set( "ACFCvars", "acf_gun", {"id", "caliber"} )
-duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id", "Caliber")
+list.Set( "ACFCvars", "acf_gun", {"id", "caliber", "baseid"} )
+duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id", "Caliber", "BaseId")
 
 function ENT:UpdateOverlayText()
 
