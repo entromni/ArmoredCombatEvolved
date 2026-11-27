@@ -138,15 +138,26 @@ local function InstallGunLinkSupport()
 
 	if OriginalHeatFunction then
 		GunENT.Heat_Function = function(Gun, ...)
-			OriginalHeatFunction(Gun, ...)
-			if IsLaser(Gun) then
-				-- ACE's base heat logic deliberately exempts >=100 mm guns from
-				-- the overheat flag. Laser variants must still overheat and take
-				-- the standard ACE overheat damage, but this does not gate firing.
-				Gun.IsOverheated = (Gun.Heat or ACE.AmbientTemp) > 200
-				if Wire_TriggerOutput then
-					Wire_TriggerOutput(Gun, "OverHeat", Gun.IsOverheated and 1 or 0)
-				end
+			if not IsLaser(Gun) then
+				return OriginalHeatFunction(Gun, ...)
+			end
+
+			-- Laser heat is generated continuously while the beam is actually
+			-- powered. Do not use ACE_HeatFromGun's one-shot HeatFire pulse:
+			-- its ordinary cooling path was leaving this weapon around 180 C.
+			local Delta = math.Clamp(Gun.DeltaTime or 0, 0, 0.25)
+			local Heat = Gun.Heat or ACE.AmbientTemp
+			if Gun.ACELaserFiring then
+				Heat = Heat + 45 * Delta -- 45 C/s; no thermal power throttling.
+			else
+				Heat = Heat - math.max(Heat - ACE.AmbientTemp, 0) * 0.1 * Delta
+			end
+
+			Gun.Heat = Heat
+			Gun.IsOverheated = Heat > 200
+			if Wire_TriggerOutput then
+				Wire_TriggerOutput(Gun, "Heat", math.Round(Heat))
+				Wire_TriggerOutput(Gun, "OverHeat", Gun.IsOverheated and 1 or 0)
 			end
 		end
 	end
@@ -157,6 +168,7 @@ end
 timer.Create("ACE_InstallLaserLinkSupport", 0.25, 20, InstallGunLinkSupport)
 
 local function StopLaser(Gun, ResetCharge)
+	Gun.ACELaserFiring = false
 	Gun:SetNW2Bool("ACE_LaserActive", false)
 	if ResetCharge then Gun.ACELaserCharge = 0 end
 	Gun.ACELaserLastUpdate = nil
@@ -223,6 +235,7 @@ local function FireLaser(Gun)
 	Power = Lerp(Charge, 0.55, 1.8)
 
 	Gun.HeatFire = true
+	Gun.ACELaserFiring = true
 	Gun:SetNW2Bool("ACE_LaserActive", true)
 	Gun:SetNW2Float("ACE_LaserBatteryCharge", math.max(Available - Supplied, 0))
 	Gun:SetNW2Float("ACE_LaserPower", Power)
