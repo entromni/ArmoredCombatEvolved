@@ -17,6 +17,7 @@ do
 	--add a gun to the class
 	ACE.DefineGun("20mmAC", { --id
 		name = "20mm Autocannon",
+	subclass = "Autocannon",
 		desc = "The 20mm AC is the smallest of the family; having a good rate of fire but a tiny shell.",
 		model = "models/autocannon/autocannon_20mm.mdl",
 		sound = "ace_weapons/multi_sound/20mm_multi.mp3",
@@ -34,6 +35,7 @@ do
 
 	ACE.DefineGun("30mmAC", {
 		name = "30mm Autocannon",
+	subclass = "Autocannon",
 		desc = "The 30mm AC can fire shells with sufficient space for a small payload, and has modest anti-armor capability",
 		model = "models/autocannon/autocannon_30mm.mdl",
 		sound = "ace_weapons/multi_sound/30mm_multi.mp3",
@@ -51,6 +53,7 @@ do
 
 	ACE.DefineGun("40mmAC", {
 		name = "40mm Autocannon",
+	subclass = "Autocannon",
 		desc = "The 40mm AC can fire shells with sufficient space for a useful payload, and can get decent penetration with proper rounds.",
 		model = "models/autocannon/autocannon_40mm.mdl",
 		sound = "ace_weapons/multi_sound/40mm_multi.mp3",
@@ -68,6 +71,7 @@ do
 
 	ACE.DefineGun("50mmAC", {
 		name = "50mm Autocannon",
+	subclass = "Autocannon",
 		desc = "The 50mm AC fires shells comparable with the 50mm Cannon, making it capable of destroying light armour quite quickly.",
 		model = "models/autocannon/autocannon_50mm.mdl",
 		sound = "ace_weapons/multi_sound/50mm_multi.mp3",
@@ -85,6 +89,7 @@ do
 
 	ACE.DefineGun("20mmHAC", { --id
 		name = "20mm Heavy Autocannon",
+	subclass = "Heavy Autocannon",
 		desc = "The 20mm HAC is the smallest heavy autocannon, special watercooling allows this autocannon to continuously fire its nonexistant payload at extreme rates, great for attacking unarmored planes or cutting down forests.",
 		model = "models/autocannon/autocannon_20mm_compact.mdl",
 		sound = "ace_weapons/multi_sound/20mm_hmg_multi.mp3",
@@ -102,6 +107,7 @@ do
 
 	ACE.DefineGun("30mmHAC", {
 		name = "30mm Heavy Autocannon",
+	subclass = "Heavy Autocannon",
 		desc = "The watercooled 30mm HAC fires decently heavy shells at a rapid rate that are great for chewing through light armor",
 		model = "models/autocannon/autocannon_30mm_compact.mdl",
 		sound = "ace_weapons/multi_sound/30mm_hmg_multi.mp3",
@@ -119,6 +125,7 @@ do
 
 	ACE.DefineGun("40mmHAC", {
 		name = "40mm Heavy Autocannon",
+	subclass = "Heavy Autocannon",
 		desc = "The watercooled 40mm HAC is a long range grinder created in secrecy by light vehicles with very little patience",
 		model = "models/autocannon/autocannon_40mm_compact.mdl",
 		sound = "ace_weapons/multi_sound/30mm_hmg_multi.mp3",
