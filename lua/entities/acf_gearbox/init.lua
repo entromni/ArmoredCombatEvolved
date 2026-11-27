@@ -77,6 +77,7 @@ do
 		Gearbox:CPPISetOwner(Owner)
 		Gearbox.Id		= Id
 		Gearbox.Model	= GearboxData.model
+		Gearbox.ACE_ModelScale = GearboxData.ACE_ModelScale or 1
 		Gearbox.Mass		= GearboxData.weight		or 1
 		Gearbox.SwitchTime  = GearboxData.switch
 		Gearbox.MaxTorque	= GearboxData.maxtq		or 0
@@ -173,9 +174,19 @@ do
 		Gearbox.LClutch = Gearbox.MaxTorque
 		Gearbox.RClutch = Gearbox.MaxTorque
 
-		Gearbox:PhysicsInit( SOLID_VPHYSICS )
-		Gearbox:SetMoveType( MOVETYPE_VPHYSICS )
-		Gearbox:SetSolid( SOLID_VPHYSICS )
+		local Scale = Gearbox.ACE_ModelScale
+
+		if Scale == 1 then
+			Gearbox:PhysicsInit( SOLID_VPHYSICS )
+			Gearbox:SetMoveType( MOVETYPE_VPHYSICS )
+			Gearbox:SetSolid( SOLID_VPHYSICS )
+		elseif not Gearbox:ACE_ApplyScaledCollision( Scale ) then
+			Gearbox:Remove()
+			return false
+		end
+
+		-- The client builds the matching collision and visuals from this.
+		Gearbox:SetNWFloat( "ACE_ModelScale", Scale )
 
 		local phys = Gearbox:GetPhysicsObject()
 		if IsValid( phys ) then
@@ -183,9 +194,10 @@ do
 			Gearbox.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass() -- giving a little wiggle room
 		end
 
-		Gearbox.In = Gearbox:WorldToLocal(Gearbox:GetAttachment(Gearbox:LookupAttachment( "input" )).Pos)
-		Gearbox.OutL = Gearbox:WorldToLocal(Gearbox:GetAttachment(Gearbox:LookupAttachment( "driveshaftL" )).Pos)
-		Gearbox.OutR = Gearbox:WorldToLocal(Gearbox:GetAttachment(Gearbox:LookupAttachment( "driveshaftR" )).Pos)
+		-- Attachments come from the unscaled model, so scale their local positions.
+		Gearbox.In = Gearbox:WorldToLocal(Gearbox:GetAttachment(Gearbox:LookupAttachment( "input" )).Pos) * Scale
+		Gearbox.OutL = Gearbox:WorldToLocal(Gearbox:GetAttachment(Gearbox:LookupAttachment( "driveshaftL" )).Pos) * Scale
+		Gearbox.OutR = Gearbox:WorldToLocal(Gearbox:GetAttachment(Gearbox:LookupAttachment( "driveshaftR" )).Pos) * Scale
 
 		Owner:AddCount("_ace_misc", Gearbox)
 		Owner:AddCleanup( "acemenu", Gearbox )
@@ -217,8 +229,8 @@ function ENT:Update( ArgsTable )
 	local Id = ArgsTable[4] -- Argtable[4] is the engine ID
 	local GearboxData = GearboxTable[Id]
 
-	if GearboxData.model ~= self.Model then
-		return false, "The new gearbox must have the same model!"
+	if GearboxData.model ~= self.Model or (GearboxData.ACE_ModelScale or 1) ~= self.ACE_ModelScale then
+		return false, "The new gearbox must have the same model and size!"
 	end
 
 	if self.Id ~= Id then
@@ -367,6 +379,20 @@ function ENT:UpdateOverlayText()
 
 end
 
+
+--- Called by the ACE tool after Entity:Activate() (the name is shared with acf_gun).
+-- Reapplies mass and inertia on custom size gearboxes.
+-- @return boolean True if the gearbox has a valid physics object.
+function ENT:ACE_FinalizeCustomCaliberPhysics()
+	local phys = self:GetPhysicsObject()
+	if not IsValid( phys ) then return false end
+	if self.ACE_ModelScale == 1 then return true end
+
+	phys:SetMass( self.Mass )
+	self.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass()
+
+	return true
+end
 
 -- prevent people from changing bodygroup
 function ENT:CanProperty( _, property )

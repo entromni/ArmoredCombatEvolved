@@ -619,6 +619,212 @@ end
 -- Any lookup of an unregistered custom ID (either realm) rebuilds it on demand.
 setmetatable(GunTable, { __index = function(_, ID) return ACE.ResolveGunID(ID) end })
 
+-- Continuous gearbox sizing. Works like the gun caliber support above: the preset
+-- definitions are exact anchors, and sizes in between are interpolated within one subtype.
+do
+	-- Size of each stock model relative to the Medium model of the same family,
+	-- measured from the model hulls. S/M/L models are uniform scales of one mesh.
+	local ModelSizes = {
+		["models/engines/linear_s.mdl"]        = { Size = 0.67, Layout = "Inline" },
+		["models/engines/linear_m.mdl"]        = { Size = 1,    Layout = "Inline" },
+		["models/engines/linear_l.mdl"]        = { Size = 1.67, Layout = "Inline" },
+		["models/engines/transaxial_s.mdl"]    = { Size = 0.67, Layout = "Transaxial" },
+		["models/engines/transaxial_m.mdl"]    = { Size = 1,    Layout = "Transaxial" },
+		["models/engines/transaxial_l.mdl"]    = { Size = 1.67, Layout = "Transaxial" },
+		["models/engines/t5small.mdl"]         = { Size = 0.67, Layout = "Straight-through" },
+		["models/engines/t5med.mdl"]           = { Size = 1,    Layout = "Straight-through" },
+		["models/engines/t5large.mdl"]         = { Size = 1.33, Layout = "Straight-through" },
+		["models/engines/flywheelclutcht.mdl"] = { Size = 0.5,  Layout = "Straight-through" },
+		["models/engines/flywheelclutchs.mdl"] = { Size = 0.75, Layout = "Straight-through" },
+		["models/engines/flywheelclutchm.mdl"] = { Size = 1,    Layout = "Straight-through" },
+		["models/engines/flywheelclutchb.mdl"] = { Size = 1.5,  Layout = "Straight-through" },
+	}
+
+	local LayoutOrder = { ["Inline"] = 1, ["Transaxial"] = 2, ["Straight-through"] = 3 }
+
+	--- Size of a gearbox definition relative to Medium.
+	-- @param Definition table A gearbox definition.
+	-- @return number|nil The size, or nil if this gearbox cannot be scaled (unknown model).
+	function ACE.GetGearboxSize(Definition)
+		if Definition.ACE_Size then return Definition.ACE_Size end
+
+		local Info = ModelSizes[string.lower(Definition.model or "")]
+		return Info and Info.Size
+	end
+
+	--- The subtype a gearbox belongs to within its category.
+	-- @param Definition table A gearbox definition.
+	-- @return string A key that is shared by every size of the subtype.
+	-- @return string The label shown in the menu.
+	-- @return number The sort order within the category.
+	function ACE.GetGearboxSubtype(Definition)
+		local Info = ModelSizes[string.lower(Definition.model or "")]
+
+		-- Gearboxes with unknown (addon) models stay as individual fixed entries.
+		if not Info then return Definition.id, Definition.name or Definition.id, 100000 end
+
+		local Label = Info.Layout
+		local Order = LayoutOrder[Info.Layout] * 2
+
+		if Definition.auto then
+			Label = Definition.gears .. "-Speed, " .. Label
+			Order = Order + Definition.gears * 100
+		end
+
+		if Definition.doubleclutch then
+			Label = Label .. ", Dual Clutch"
+			Order = Order + 1
+		end
+
+		return Label, Label, Order
+	end
+
+	local function IsPresetOf(Definition, Category, SubtypeKey)
+		return not Definition.ACE_CustomPreset and Definition.category == Category
+			and ACE.GetGearboxSubtype(Definition) == SubtypeKey
+	end
+
+	--- Preset sizes of one subtype, smallest first.
+	-- @param Category string Gearbox category, such as "4-Speed".
+	-- @param SubtypeKey string Key returned by ACE.GetGearboxSubtype.
+	-- @return table Array of preset definitions.
+	function ACE.GetGearboxAnchors(Category, SubtypeKey)
+		local Anchors = {}
+
+		for _, Definition in pairs(GearboxTable) do
+			if IsPresetOf(Definition, Category, SubtypeKey) then
+				Anchors[#Anchors + 1] = Definition
+			end
+		end
+
+		table.sort(Anchors, function(A, B)
+			local SizeA, SizeB = ACE.GetGearboxSize(A) or 1, ACE.GetGearboxSize(B) or 1
+			if SizeA == SizeB then return A.id < B.id end
+			return SizeA < SizeB
+		end)
+
+		return Anchors
+	end
+
+	--- All subtypes of a category, in menu order.
+	-- @param Category string Gearbox category.
+	-- @return table Array of { Key = string, Label = string, Order = number }.
+	function ACE.GetGearboxSubtypes(Category)
+		local Subtypes, Seen = {}, {}
+
+		for _, Definition in pairs(GearboxTable) do
+			if Definition.category == Category and not Definition.ACE_CustomPreset then
+				local Key, Label, Order = ACE.GetGearboxSubtype(Definition)
+
+				if not Seen[Key] then
+					Seen[Key] = true
+					Subtypes[#Subtypes + 1] = { Key = Key, Label = Label, Order = Order }
+				end
+			end
+		end
+
+		table.sort(Subtypes, function(A, B)
+			if A.Order == B.Order then return A.Label < B.Label end
+			return A.Order < B.Order
+		end)
+
+		return Subtypes
+	end
+
+	--- Returns the gearbox definition for any size of a preset's subtype.
+	-- Weight, torque rating and shift time are interpolated between the two nearest presets.
+	-- @param DefinitionID string ID of any gearbox in the wanted subtype.
+	-- @param Size number Wanted size relative to Medium. Clamped to the preset range.
+	-- @return table|nil The definition.
+	-- @return number Model scale to apply to the definition's model.
+	-- @return string ID of the definition.
+	function ACE.InterpolateGearboxPreset(DefinitionID, Size)
+		local Base = GearboxTable[DefinitionID]
+		if not Base then return nil, 1, DefinitionID end
+
+		Size = tonumber(Size)
+		if not Size or not ACE.GetGearboxSize(Base) then return Base, Base.ACE_ModelScale or 1, Base.id end
+
+		local Anchors = ACE.GetGearboxAnchors(Base.category, (ACE.GetGearboxSubtype(Base)))
+		if #Anchors == 0 then return Base, Base.ACE_ModelScale or 1, Base.id end
+
+		Size = math.Clamp(Size, ACE.GetGearboxSize(Anchors[1]), ACE.GetGearboxSize(Anchors[#Anchors]))
+
+		-- Sizes use steps of 0.01 so the same slider value always gives the same ID.
+		for _, Anchor in ipairs(Anchors) do
+			if math.abs(Size - ACE.GetGearboxSize(Anchor)) <= 0.005001 then
+				return Anchor, 1, Anchor.id
+			end
+		end
+		Size = math.Round(Size, 2)
+
+		local Lower, Upper
+		for Index = 1, #Anchors - 1 do
+			if Size > ACE.GetGearboxSize(Anchors[Index]) and Size < ACE.GetGearboxSize(Anchors[Index + 1]) then
+				Lower, Upper = Anchors[Index], Anchors[Index + 1]
+				break
+			end
+		end
+		if not Lower then return Base, Base.ACE_ModelScale or 1, Base.id end
+
+		local CustomID = string.format("ACE_CustomGB_%s_%d", Anchors[1].id, math.Round(Size * 100))
+
+		local Existing = rawget(GearboxTable, CustomID)
+		if Existing then return Existing, Existing.ACE_ModelScale, CustomID end
+
+		local LowerSize = ACE.GetGearboxSize(Lower)
+		local Fraction = (Size - LowerSize) / (ACE.GetGearboxSize(Upper) - LowerSize)
+		local Result = table.Copy(Lower)
+
+		local function Blend(Key, Decimals)
+			if isnumber(Lower[Key]) and isnumber(Upper[Key]) then
+				Result[Key] = math.Round(Lerp(Fraction, Lower[Key], Upper[Key]), Decimals)
+			end
+		end
+		Blend("weight", 1)
+		Blend("maxtq", 0)
+		Blend("switch", 3)
+		Blend("acepoints", 3)
+
+		local _, SubtypeLabel = ACE.GetGearboxSubtype(Lower)
+		if not Lower.auto then SubtypeLabel = Lower.category .. ", " .. SubtypeLabel end
+
+		Result.id = CustomID
+		Result.name = string.format("%s%s, %.2fx", Lower.auto and "Auto, " or "", SubtypeLabel, Size)
+		Result.ACE_Size = Size
+		Result.ACE_ModelScale = Size / LowerSize
+		Result.ACE_CustomPreset = true
+
+		GearboxTable[CustomID] = Result
+		return Result, Result.ACE_ModelScale, CustomID
+	end
+
+	--- Rebuilds a custom size gearbox definition from its ID alone.
+	-- Needed for dupes, other clients and fresh server sessions.
+	-- @param ID string An "ACE_CustomGB_<smallest preset ID>_<size * 100>" gearbox ID.
+	-- @return table|nil The registered definition, or nil if the ID is not valid.
+	function ACE.ResolveGearboxID(ID)
+		if not isstring(ID) then return end
+
+		local Existing = rawget(GearboxTable, ID)
+		if Existing then return Existing end
+
+		local PresetID, SizeKey = string.match(ID, "^ACE_CustomGB_(.+)_(%d+)$")
+		if not PresetID or not rawget(GearboxTable, PresetID) then return end
+
+		-- Interpolation clamps and rounds, so an out-of-range ID comes back different.
+		ACE.InterpolateGearboxPreset(PresetID, tonumber(SizeKey) / 100)
+
+		return rawget(GearboxTable, ID)
+	end
+
+	-- Any lookup of an unregistered custom ID (either realm) rebuilds it on demand.
+	-- Mobility is still read by E2/Starfall, which expect to find every spawned gearbox.
+	-- Custom sizes are not stored there, so they stay out of its lists.
+	setmetatable(GearboxTable, { __index = function(_, ID) return ACE.ResolveGearboxID(ID) end })
+	setmetatable(MobilityTable, { __index = function(_, ID) return ACE.ResolveGearboxID(ID) end })
+end
+
 -- Keep the cannon-named functions as compatibility wrappers for existing code.
 function ACE.GetCannonCaliberBounds()
 	return ACE.GetGunCaliberBounds("C")

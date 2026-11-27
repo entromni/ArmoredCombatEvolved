@@ -19,6 +19,49 @@ function ENT:Draw()
 
 end
 
+-- Applies custom size collision and visuals. Checked from Think so it also
+-- covers late joiners and a client physics object that has been lost.
+local function UpdateGearboxScale( Gearbox )
+	local Scale = Gearbox:GetNWFloat( "ACE_ModelScale", 1 )
+	if Scale == 1 then return end
+	if Gearbox.ACE_AppliedScale == Scale and IsValid( Gearbox:GetPhysicsObject() ) then return end
+	if not Gearbox:ACE_ApplyScaledCollision( Scale ) then return end
+
+	local Phys = Gearbox:GetPhysicsObject()
+	Phys:EnableMotion( false )
+	Phys:Sleep()
+
+	local Mat = Matrix()
+	Mat:Scale( Vector( Scale, Scale, Scale ) )
+	Gearbox:EnableMatrix( "RenderMultiply", Mat )
+	Gearbox:SetRenderBounds( Gearbox:GetCollisionBounds() )
+	Gearbox:DrawShadow( false )
+
+	Gearbox.ACE_AppliedScale = Scale
+end
+
+-- The client physics object does not follow the entity by itself.
+-- Unscaled gearboxes return nothing and keep default behaviour.
+function ENT:CalcAbsolutePosition( Position, Angles )
+	if not self.ACE_AppliedScale then return end
+
+	local Phys = self:GetPhysicsObject()
+	if IsValid( Phys ) then
+		Phys:SetPos( self:GetPos() )
+		Phys:SetAngles( self:GetAngles() )
+		Phys:EnableMotion( false )
+		Phys:Sleep()
+	end
+
+	return Position, Angles
+end
+
+function ENT:Think()
+	UpdateGearboxScale( self )
+
+	return self.BaseClass.Think( self )
+end
+
 function ACE_GearboxGUICreate( Table )
 
 	if not acemenupanel.Serialize then
@@ -35,14 +78,21 @@ function ACE_GearboxGUICreate( Table )
 		acemenupanel.GearboxData = {}
 	end
 
-	if not acemenupanel.GearboxData[Table.id] then
-		acemenupanel.GearboxData[Table.id] = {}
-		acemenupanel.GearboxData[Table.id].GearTable = Table.geartable
+	local SubtypeKey = ACE.GetGearboxSubtype( Table )
+
+	-- Ratios are remembered per subtype, so they carry across sizes.
+	local StateKey = Table.category .. "|" .. SubtypeKey
+
+	if not acemenupanel.GearboxData[StateKey] then
+		acemenupanel.GearboxData[StateKey] = {}
+		acemenupanel.GearboxData[StateKey].GearTable = table.Copy( Table.geartable )
 	end
 
-	if Table.auto and not acemenupanel.GearboxData[Table.id].ShiftTable then
-		acemenupanel.GearboxData[Table.id].ShiftTable = {10,20,30,40,50,60,70}
+	if Table.auto and not acemenupanel.GearboxData[StateKey].ShiftTable then
+		acemenupanel.GearboxData[StateKey].ShiftTable = {10,20,30,40,50,60,70}
 	end
+
+	acemenupanel.CustomDisplay:EnableVerticalScrollbar( true )
 
 	acemenupanel:CPanelText("Name", Table.name, "DermaDefaultBold")
 
@@ -55,11 +105,51 @@ function ACE_GearboxGUICreate( Table )
 		acemenupanel.CData.DisplayModel.LayoutEntity = function() end
 	acemenupanel.CustomDisplay:AddItem( acemenupanel.CData.DisplayModel )
 
+	-- Subtype selector: only shown when this gearbox type has more than one.
+	local Subtypes = ACE.GetGearboxSubtypes( Table.category )
+	local Size = ACE.GetGearboxSize( Table )
+
+	if #Subtypes > 1 then
+		local SubtypeCombo = vgui.Create( "DComboBox", acemenupanel.CustomDisplay )
+		SubtypeCombo:SetSize( acemenupanel.CustomDisplay:GetWide(), 28 )
+		SubtypeCombo:SetSortItems( false )
+		for _, Subtype in ipairs( Subtypes ) do
+			SubtypeCombo:AddChoice( Subtype.Label, Subtype.Key )
+		end
+		for _, Subtype in ipairs( Subtypes ) do
+			if Subtype.Key == SubtypeKey then SubtypeCombo:SetValue( Subtype.Label ) end
+		end
+		SubtypeCombo.OnSelect = function( _, _, _, Key )
+			if Key == SubtypeKey then return end
+			local Anchors = ACE.GetGearboxAnchors( Table.category, Key )
+			if not Anchors[1] then return end
+			-- Keep the chosen size, clamped to what the new subtype supports.
+			local Definition = ACE.InterpolateGearboxPreset( Anchors[1].id, Size or 1 )
+			acemenupanel:UpdateDisplay( Definition )
+		end
+		acemenupanel.CustomDisplay:AddItem( SubtypeCombo )
+	end
+
+	local SizeSlider
+	local Anchors = ACE.GetGearboxAnchors( Table.category, SubtypeKey )
+
+	if Size and #Anchors > 1 then
+		SizeSlider = vgui.Create( "DNumSlider", acemenupanel.CustomDisplay )
+		SizeSlider:SetText( "Size (1.00 = Medium)" )
+		SizeSlider:SetDark( true )
+		SizeSlider:SetMin( ACE.GetGearboxSize( Anchors[1] ) )
+		SizeSlider:SetMax( ACE.GetGearboxSize( Anchors[#Anchors] ) )
+		SizeSlider:SetDecimals( 2 )
+		SizeSlider:SetSize( acemenupanel.CustomDisplay:GetWide(), 35 )
+		SizeSlider:SetValue( Size )
+		acemenupanel.CustomDisplay:AddItem( SizeSlider )
+	end
+
 	acemenupanel:CPanelText("Desc", Table.desc) --Description (Name, Desc)
 
 	if Table.auto and not acemenupanel.CData.UnitsInput then
 		acemenupanel.CData.UnitsInput = vgui.Create( "DComboBox", acemenupanel.CustomDisplay )
-			acemenupanel.CData.UnitsInput.ID = Table.id
+			acemenupanel.CData.UnitsInput.ID = StateKey
 			acemenupanel.CData.UnitsInput.Gears = Table.gears
 			acemenupanel.CData.UnitsInput:SetSize( 60,22 )
 			acemenupanel.CData.UnitsInput:SetTooltip( "If using the shift point generator, recalc after changing units." )
@@ -73,24 +163,30 @@ function ACE_GearboxGUICreate( Table )
 		acemenupanel.CustomDisplay:AddItem(acemenupanel.CData.UnitsInput)
 	end
 
+	local GearTable = acemenupanel.GearboxData[StateKey].GearTable
+	local FinalDrive = GearTable[10] or GearTable[-1] -- Slider 10 is the final drive
+
 	if Table.cvt then
-		ACE_GearsSlider(2, acemenupanel.GearboxData[Table.id].GearTable[2], Table.id)
-		ACE_GearsSlider(3, acemenupanel.GearboxData[Table.id].GearTable[-3], Table.id, "Min Target RPM",true)
-		ACE_GearsSlider(4, acemenupanel.GearboxData[Table.id].GearTable[-2], Table.id, "Max Target RPM",true)
-		ACE_GearsSlider(10, acemenupanel.GearboxData[Table.id].GearTable[-1], Table.id, "Final Drive")
+		ACE_GearsSlider(2, GearTable[2], StateKey)
+		ACE_GearsSlider(3, GearTable[3] or GearTable[-3], StateKey, "Min Target RPM",true)
+		ACE_GearsSlider(4, GearTable[4] or GearTable[-2], StateKey, "Max Target RPM",true)
+		ACE_GearsSlider(10, FinalDrive, StateKey, "Final Drive")
 		RunConsoleCommand( "acemenu_data1", 0.01 )
 	else
-		for ID,Value in pairs(acemenupanel.GearboxData[Table.id].GearTable) do
-			if ID > 0 and not (Table.auto and ID == 8) then
-				ACE_GearsSlider(ID, Value, Table.id)
+		-- Slot 8 holds the reverse gear on automatics.
+		for ID = 1, 9 do
+			if GearTable[ID] and not (Table.auto and ID == 8) then
+				ACE_GearsSlider(ID, GearTable[ID], StateKey)
 				if Table.auto then
-					ACE_ShiftPoint(ID, acemenupanel.GearboxData[Table.id].ShiftTable[ID], Table.id, "Gear " .. ID .. " upshift speed: ")
+					ACE_ShiftPoint(ID, acemenupanel.GearboxData[StateKey].ShiftTable[ID], StateKey, "Gear " .. ID .. " upshift speed: ")
 				end
-			elseif Table.auto and (ID == -2 or ID == 8) then
-				ACE_GearsSlider(8, Value, Table.id, "Reverse")
-			elseif ID == -1 then
-				ACE_GearsSlider(10, Value, Table.id, "Final Drive")
 			end
+		end
+		if Table.auto then
+			ACE_GearsSlider(8, GearTable[8] or GearTable[-2], StateKey, "Reverse")
+		end
+		if FinalDrive then
+			ACE_GearsSlider(10, FinalDrive, StateKey, "Final Drive")
 		end
 	end
 
@@ -108,8 +204,9 @@ function ACE_GearboxGUICreate( Table )
 	acemenupanel.CustomDisplay:AddItem(InvertButton)
 
 	acemenupanel:CPanelText("Desc", Table.desc)
-	acemenupanel:CPanelText("MaxTorque", "Clutch Maximum Torque Rating : " .. Table.maxtq .. "n-m / " .. math.Round(Table.maxtq * 0.73) .. "ft-lb")
-	acemenupanel:CPanelText("Weight", "Weight : " .. Table.weight .. "kg\n")
+	acemenupanel:CPanelText("MaxTorque", "")
+	acemenupanel:CPanelText("Weight", "")
+	acemenupanel:CPanelText("SwitchTime", "")
 
 	if Table.auto then
 		acemenupanel:CPanelText( "ShiftPointGen", "Shift Point Generator:", "DermaDefaultBold" )
@@ -201,8 +298,37 @@ function ACE_GearboxGUICreate( Table )
 		end
 	end
 
+	-- Updates everything that depends on size in place, so the slider survives dragging.
+	local function ShowDefinition( Definition, ModelScale )
+		acemenupanel:CPanelText("Name", Definition.name, "DermaDefaultBold")
+		acemenupanel:CPanelText("MaxTorque", "Clutch Maximum Torque Rating : " .. Definition.maxtq .. "n-m / " .. math.Round(Definition.maxtq * 0.73) .. "ft-lb")
+		acemenupanel:CPanelText("Weight", "Weight : " .. Definition.weight .. "kg")
+		acemenupanel:CPanelText("SwitchTime", "Shift time : " .. Definition.switch .. "s\n")
+
+		local Preview = acemenupanel.CData.DisplayModel
+		if Preview.ACE_Model ~= Definition.model then
+			Preview:SetModel( Definition.model )
+			Preview.ACE_Model = Definition.model
+		end
+		if IsValid( Preview.Entity ) then Preview.Entity:SetModelScale( ModelScale, 0 ) end
+
+		maxtorque = Definition.maxtq
+	end
+
+	ShowDefinition( Table, Table.ACE_ModelScale or 1 )
+
+	if SizeSlider then
+		SizeSlider.OnValueChanged = function( _, Value )
+			local Definition, ModelScale, ID = ACE.InterpolateGearboxPreset( Table.id, Value )
+			if not Definition then return end
+
+			Size = ACE.GetGearboxSize( Definition )
+			RunConsoleCommand( "acemenu_id", ID )
+			ShowDefinition( Definition, ModelScale )
+		end
+	end
+
 	acemenupanel.CustomDisplay:PerformLayout()
-	maxtorque = Table.maxtq
 end
 
 function ACE_GearsSlider(Gear, Value, ID, Desc, CVT)
