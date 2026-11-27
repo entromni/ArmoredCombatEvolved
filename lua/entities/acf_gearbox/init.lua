@@ -328,6 +328,14 @@ function ENT:Update( ArgsTable )
 	if ModelChanged or ScaleChanged then
 		local OldModel = CurrentModel
 		local OldScale = self.ACE_ModelScale or self:GetNWFloat("ACE_ModelScale", 1)
+		-- NWFloat can be zero on legacy entities before the networked value is
+		-- initialized. Recover their actual scale from the saved gearbox ID;
+		-- otherwise the attachment scale ratio becomes nil and valid cached
+		-- In/Out vectors are discarded, causing the false attachment failure.
+		if not isnumber(OldScale) or OldScale <= 0 then
+			local PreviousData = GearboxTable[self.Id]
+			OldScale = PreviousData and PreviousData.ACE_ModelScale or 1
+		end
 		local OldIn, OldOutL, OldOutR = self.In, self.OutL, self.OutR
 		local HasParent = IsValid(self:GetParent())
 		local SavedPos, SavedAng = self:GetPos(), self:GetAngles()
