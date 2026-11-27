@@ -366,17 +366,17 @@ function ACE_MakeGun(Owner, Pos, Angle, Id, Caliber, BaseId, Subclass)
 		-- Scale the actual model convexes to match the rendered custom caliber.
 		-- SetModelScale alone does not scale VPhysics collision geometry.
 		if ModelScale ~= 1 then
-			local Convexes = util.GetModelConvexes(Gun.Model)
+			local OriginalPhysics = Gun:GetPhysicsObject()
+			local Convexes = IsValid(OriginalPhysics) and OriginalPhysics:GetMeshConvexes()
 			local ScaledConvexes = {}
 
 			if istable(Convexes) then
 				for _, Convex in ipairs(Convexes) do
 					local ScaledConvex = {}
 					for _, Vertex in ipairs(Convex) do
-						if isvector(Vertex) then
-							ScaledConvex[#ScaledConvex + 1] = Vertex * ModelScale
-					elseif istable(Vertex) and isvector(Vertex.pos) then
-							ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
+						local Position = isvector(Vertex) and Vertex or (istable(Vertex) and Vertex.pos)
+						if isvector(Position) then
+							ScaledConvex[#ScaledConvex + 1] = Position * ModelScale
 						end
 					end
 					if #ScaledConvex >= 4 then
