@@ -1,6 +1,7 @@
 -- Sci-fi continuous laser cannon. Uses ACE's normal gun, ammo, heat and point systems.
 ACE.DefineGunClass("SFL", {
 	type = "Gun",
+	spread = 0,
 	name = "Sci-Fi Laser",
 	desc = "Continuous-beam laser weapons. Sustained fire ramps beam power and generates severe heat.",
 	muzzleflash = "SFL",
