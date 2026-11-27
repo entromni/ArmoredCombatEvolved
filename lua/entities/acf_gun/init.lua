@@ -350,35 +350,14 @@ do
 		end
 		Gun:PhysicsInit( SOLID_VPHYSICS )
 
-		-- SetModelScale affects rendering, so rebuild convex collision geometry scaled
-		-- in local space to keep the custom-caliber gun's hitbox proportional.
+		-- Let the engine rebuild the model's own physics at the entity scale.
+		-- Reconstructing GetMeshConvexes manually was producing a distorted hull,
+		-- which also made player eye traces miss the model.
 		if ModelScale ~= 1 then
-			local OriginalPhysics = Gun:GetPhysicsObject()
-			if IsValid(OriginalPhysics) then
-				local Convexes = OriginalPhysics:GetMeshConvexes()
-				if istable(Convexes) and #Convexes > 0 then
-					local ScaledConvexes = {}
-					for _, Convex in ipairs(Convexes) do
-						local ScaledConvex = {}
-						for _, Vertex in ipairs(Convex) do
-							if isvector(Vertex) then
-								ScaledConvex[#ScaledConvex + 1] = Vertex * ModelScale
-							elseif istable(Vertex) and isvector(Vertex.pos) then
-								ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
-							end
-						end
-						if #ScaledConvex >= 4 then
-							ScaledConvexes[#ScaledConvexes + 1] = ScaledConvex
-						end
-					end
-					if #ScaledConvexes > 0 then
-						Gun:PhysicsInitMultiConvex(ScaledConvexes)
-						Gun:SetMoveType(MOVETYPE_VPHYSICS)
-						Gun:SetSolid(SOLID_VPHYSICS)
-					end
-				end
-			end
+			Gun:Activate()
+			Gun.CannonCaliberScale = ModelScale
 		end
+
 		Gun:SetMoveType( MOVETYPE_VPHYSICS )
 		Gun:SetSolid( SOLID_VPHYSICS )
 
