@@ -20,14 +20,42 @@ function ENT:Draw()
 end
 
 -- Applies custom size collision and visuals. Checked from Think so it also
--- covers late joiners and a client physics object that has been lost.
+-- covers late joiners, model changes and a client physics object that was lost.
 local function UpdateGearboxScale( Gearbox )
 	local Scale = Gearbox:GetNWFloat( "ACE_ModelScale", 1 )
-	if Scale == 1 then return end
-	if Gearbox.ACE_AppliedScale == Scale and IsValid( Gearbox:GetPhysicsObject() ) then return end
+	local Model = Gearbox:GetModel()
+
+	-- Custom scaling must be explicitly cleared when returning to a stock size.
+	-- Otherwise the old RenderMultiply matrix and custom client collision remain.
+	if Scale == 1 then
+		if Gearbox.ACE_AppliedScale or Gearbox.ACE_AppliedModel then
+			Gearbox:PhysicsInit( SOLID_VPHYSICS )
+			Gearbox:SetMoveType( MOVETYPE_VPHYSICS )
+			Gearbox:SetSolid( SOLID_VPHYSICS )
+			Gearbox:EnableCustomCollisions( false )
+			Gearbox:DisableMatrix( "RenderMultiply" )
+
+			local Mins, Maxs = Gearbox:GetModelBounds()
+			Gearbox:SetRenderBounds( Mins, Maxs )
+			Gearbox:DrawShadow( true )
+
+			Gearbox.ACE_AppliedScale = nil
+			Gearbox.ACE_AppliedModel = nil
+		end
+
+		return
+	end
+
+	-- The model can change at an anchor boundary while the numeric scale stays
+	-- the same. Include the model in the cache key so its collision is rebuilt.
+	if Gearbox.ACE_AppliedScale == Scale
+	and Gearbox.ACE_AppliedModel == Model
+	and IsValid( Gearbox:GetPhysicsObject() ) then return end
+
 	if not Gearbox:ACE_ApplyScaledCollision( Scale ) then return end
 
 	local Phys = Gearbox:GetPhysicsObject()
+	if not IsValid( Phys ) then return end
 	Phys:EnableMotion( false )
 	Phys:Sleep()
 
@@ -38,6 +66,7 @@ local function UpdateGearboxScale( Gearbox )
 	Gearbox:DrawShadow( false )
 
 	Gearbox.ACE_AppliedScale = Scale
+	Gearbox.ACE_AppliedModel = Model
 end
 
 -- The client physics object does not follow the entity by itself.
