@@ -313,12 +313,21 @@ function ENT:Update( ArgsTable )
 	-- changes, not only when the numeric scale changes.
 	local NewModel = GearboxData.model
 	local NewScale = GearboxData.ACE_ModelScale or 1
-	local ModelChanged = NewModel ~= self.Model
-	local ScaleChanged = NewScale ~= (self.ACE_ModelScale or 1)
+
+	-- Migrate entities saved before procedural scaling added these fields.
+	-- Their actual model is authoritative; missing scale means stock scale.
+	local CurrentModel = self.Model or self:GetModel()
+	local LegacyScaleMissing = self.ACE_ModelScale == nil
+	local ModelChanged = NewModel ~= CurrentModel
+	local ScaleChanged = NewScale ~= (self.ACE_ModelScale or 1) or LegacyScaleMissing
 
 	if ModelChanged or ScaleChanged then
-		local OldModel = self.Model
-		local OldScale = self.ACE_ModelScale or 1
+		local OldModel = CurrentModel
+		local OldScale = self.ACE_ModelScale or self:GetNWFloat("ACE_ModelScale", 1)
+		local Parent = self:GetParent()
+		local HasParent = IsValid(Parent)
+		local SavedPos, SavedAng = self:GetPos(), self:GetAngles()
+		local SavedLocalPos, SavedLocalAng = self:GetLocalPos(), self:GetLocalAngles()
 
 		self:SetModel(NewModel)
 		local CollisionOK
@@ -344,6 +353,17 @@ function ENT:Update( ArgsTable )
 				self:ACE_ApplyScaledCollision(OldScale)
 			end
 			return false, "Failed to rebuild gearbox collision for the selected size/model!"
+		end
+
+		-- PhysicsInit can reset a parented entity's transform. Preserve its
+		-- parent-relative placement across model/collision reconstruction.
+		if HasParent and IsValid(Parent) then
+			self:SetParent(Parent)
+			self:SetLocalPos(SavedLocalPos)
+			self:SetLocalAngles(SavedLocalAng)
+		else
+			self:SetPos(SavedPos)
+			self:SetAngles(SavedAng)
 		end
 
 		self.Model = NewModel
