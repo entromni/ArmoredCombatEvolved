@@ -350,81 +350,75 @@ function ENT:Update( ArgsTable )
 		self.ACE_ModelScale = NewScale
 		self:SetNWFloat("ACE_ModelScale", NewScale)
 
-		-- Attachments are model-space positions. Re-read them after SetModel,
-		-- then apply the new uniform scale.
-		local function GetScaledAttachment(Name)
-			local AttachmentID = self:LookupAttachment(Name)
-			if not AttachmentID or AttachmentID <= 0 then return nil end
 
-			local Attachment = self:GetAttachment(AttachmentID)
-			if not Attachment or not Attachment.Pos then return nil end
+		-- SetModel/PhysicsInit can leave server attachment transforms stale for
+		-- this frame. Cache them only after the model's bones have refreshed.
+		self.ACE_LinkRefreshPending = true
 
-			return self:WorldToLocal(Attachment.Pos) * NewScale
+		-- Remove old rope entities/constraints before their physics endpoints
+		-- are replaced. Keep logical WheelLink records and Wire ports intact.
+		for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
+			for _, Link in pairs(Source.WheelLink or {}) do
+				if Source ~= self and Link.Ent ~= self then continue end
+				if IsValid(Link.Rope) then Link.Rope:Remove() end
+				Link.Rope = nil
+
+				for _, Data in pairs(constraint.FindConstraints(Source, "Rope") or {}) do
+					if (Data.Ent1 == Source and Data.Ent2 == Link.Ent)
+					or (Data.Ent1 == Link.Ent and Data.Ent2 == Source) then
+						if IsValid(Data.Constraint) then Data.Constraint:Remove() end
+					end
+				end
+			end
 		end
 
-		local NewIn = GetScaledAttachment("input")
-		local NewOutL = GetScaledAttachment("driveshaftL")
-		local NewOutR = GetScaledAttachment("driveshaftR")
-
-		-- A missing attachment must not silently become vector_origin: that
-		-- makes recreated driveshaft ropes snap to the gearbox/world origin.
-		if not NewIn or not NewOutL or not NewOutR then
-			return false, "The selected gearbox model is missing a required drivetrain attachment!"
-		end
-
-		self.In = NewIn
-		self.OutL = NewOutL
-		self.OutR = NewOutR
-
-		-- Keep existing drivetrain links attached to the resized gearbox.
-		-- Recreate rope constraints on the next tick, after SetModel/PhysicsInit
-		-- has finished updating attachment transforms. Keep the drivetrain's
-		-- logical links and selected side intact.
 		local Gearbox = self
-		timer.Simple(0, function()
+		timer.Simple(0.1, function()
 			if not IsValid(Gearbox) then return end
 
-			-- PhysicsInit replaces the gearbox's physics object. Rebuild ropes
-			-- on both sides of this gearbox: incoming ropes are owned by the
-			-- upstream gearbox and are not present in Gearbox.WheelLink.
-			local Gearboxes = ents.FindByClass("acf_gearbox")
+			local function GetScaledAttachment(Name)
+				local AttachmentID = Gearbox:LookupAttachment(Name)
+				if not AttachmentID or AttachmentID <= 0 then return nil end
 
-			for _, Source in ipairs(Gearboxes) do
-				if not IsValid(Source) then continue end
+				local Attachment = Gearbox:GetAttachment(AttachmentID)
+				if not Attachment or not isvector(Attachment.Pos) then return nil end
 
+				return Gearbox:WorldToLocal(Attachment.Pos) * NewScale
+			end
+
+			local NewIn = GetScaledAttachment("input")
+			local NewOutL = GetScaledAttachment("driveshaftL")
+			local NewOutR = GetScaledAttachment("driveshaftR")
+
+			if not NewIn or not NewOutL or not NewOutR then
+				Gearbox.ACE_LinkRefreshPending = false
+				ErrorNoHalt("[ACE] Failed to refresh gearbox drivetrain attachments after resize: ", tostring(Gearbox.Model), "\n")
+				return
+			end
+
+			Gearbox.In = NewIn
+			Gearbox.OutL = NewOutL
+			Gearbox.OutR = NewOutR
+
+			-- Incoming links live in the upstream gearbox's WheelLink table.
+			for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
 				for _, Link in pairs(Source.WheelLink or {}) do
 					local Target = Link.Ent
 					if not IsValid(Target) then continue end
 					if Source ~= Gearbox and Target ~= Gearbox then continue end
 
-					local Out = Source == Gearbox
-						and (Link.Side == 0 and Gearbox.OutL or Gearbox.OutR)
-						or Link.Output
+					local Out = Link.Output
+					if Source == Gearbox then
+						Out = Link.Side == 0 and Gearbox.OutL or Gearbox.OutR
+						Link.Output = Out
+					end
+
 					local In = Target.IsGeartrain and Target.In or vector_origin
 					if not isvector(Out) or not isvector(In) then continue end
 
 					local OutWorld = Source:LocalToWorld(Out)
 					local InWorld = Target:LocalToWorld(In)
-
-					-- Remove the stored rope and any stale rope constraint left
-					-- attached to the old physics object.
-					if IsValid(Link.Rope) then Link.Rope:Remove() end
-					Link.Rope = nil
-
-					for _, Constraint in pairs(constraint.FindConstraints(Source, "Rope") or {}) do
-						if (Constraint.Ent1 == Source and Constraint.Ent2 == Target)
-						or (Constraint.Ent1 == Target and Constraint.Ent2 == Source) then
-							if IsValid(Constraint.Constraint) then
-								Constraint.Constraint:Remove()
-							end
-						end
-					end
-
-					if Source == Gearbox then
-						Link.Output = Out
-					end
-
-					Link.RopeLen = (OutWorld - InWorld):Length()
+					Link.RopeLen = OutWorld:Distance(InWorld)
 
 					local Owner = Source:CPPIGetOwner()
 					local MakeRopes = IsValid(Owner)
@@ -435,6 +429,8 @@ function ENT:Update( ArgsTable )
 					end
 				end
 			end
+
+			Gearbox.ACE_LinkRefreshPending = false
 		end)
 	end
 
@@ -630,6 +626,8 @@ function ENT:Think()
 end
 
 function ENT:CheckRopes()
+
+	if self.ACE_LinkRefreshPending then return end
 
 	for _, Link in pairs( self.WheelLink ) do
 
@@ -944,6 +942,10 @@ do
 end
 
 function ENT:Link( Target )
+
+	if self.ACE_LinkRefreshPending or (IsValid(Target) and Target.ACE_LinkRefreshPending) then
+		return false, "Gearbox attachments are refreshing after a size update; try linking again in a moment!"
+	end
 
 	if not IsValid( Target ) or not table.HasValue( { "prop_physics", "acf_gearbox", "tire" }, Target:GetClass() ) then
 		return false, "Can only link props or gearboxes!"
