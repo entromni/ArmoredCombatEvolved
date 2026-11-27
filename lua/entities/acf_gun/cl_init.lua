@@ -103,10 +103,29 @@ function ACE_GunGUICreate( Table )
 	GunDisplay.LayoutEntity = function() end
 	acemenupanel.CustomDisplay:AddItem( GunDisplay )
 
-	-- Every ordinary gun class gets a continuous caliber slider. Rack-based
-	-- ordnance has its own sizing/configuration and deliberately skips this control.
+	-- Subclass selector: only show it when this class has multiple variants.
+	local Subclasses = ACE.GetGunSubclasses and ACE.GetGunSubclasses(Table.gunclass) or {}
+	local SelectedSubclass = Table.subclass or "Standard"
+	if #Subclasses > 1 then
+		local SubclassCombo = vgui.Create("DComboBox", acemenupanel.CustomDisplay)
+		SubclassCombo:SetValue(SelectedSubclass)
+		SubclassCombo:SetSize(acemenupanel.CustomDisplay:GetWide(), 28)
+		for _, Name in ipairs(Subclasses) do SubclassCombo:AddChoice(Name) end
+		SubclassCombo.OnSelect = function(_, _, Name)
+			if Name == SelectedSubclass then return end
+			local Preset = ACE.GetGunSubclassPreset(Table.gunclass, Name, Table.caliber)
+			if not Preset then return end
+			RunConsoleCommand("acemenu_subclass", Name)
+			RunConsoleCommand("acemenu_id", Preset.id)
+			RunConsoleCommand("acemenu_caliber", "0")
+			acemenupanel:UpdateDisplay(Preset)
+		end
+		acemenupanel.CustomDisplay:AddItem(SubclassCombo)
+	end
+
+	-- Slider bounds and interpolation are scoped to the selected subclass.
 	if not Table.rack and isnumber(Table.caliber) then
-		local Minimum, Maximum = ACE.GetGunCaliberBounds(Table.gunclass)
+		local Minimum, Maximum = ACE.GetGunCaliberBounds(Table.gunclass, SelectedSubclass)
 		if Minimum and Maximum and Minimum > 0 and Maximum >= Minimum then
 			local PreviewLabel = vgui.Create("DLabel", acemenupanel.CustomDisplay)
 			PreviewLabel:SetDark(true)
@@ -123,7 +142,8 @@ function ACE_GunGUICreate( Table )
 			CaliberSlider.OnValueChanged = function(_, Millimeters)
 				Millimeters = math.Clamp(Millimeters, Minimum * 10, Maximum * 10)
 				RunConsoleCommand("acemenu_caliber", string.format("%.1f", Millimeters))
-				local Preview, ModelScale = ACE.InterpolateGunPreset(Table.id, Millimeters / 10)
+				RunConsoleCommand("acemenu_subclass", SelectedSubclass)
+				local Preview, ModelScale = ACE.InterpolateGunPreset(Table.id, Millimeters / 10, SelectedSubclass)
 				if not Preview then return end
 				PreviewLabel:SetText(string.format(
 					"Preview: %.1fmm | %.1fkg | %s",
@@ -141,7 +161,6 @@ function ACE_GunGUICreate( Table )
 			RunConsoleCommand("acemenu_caliber", "0")
 		end
 	else
-		-- Prevent the previous ordinary gun's selected caliber leaking into racks.
 		RunConsoleCommand("acemenu_caliber", "0")
 	end
 
