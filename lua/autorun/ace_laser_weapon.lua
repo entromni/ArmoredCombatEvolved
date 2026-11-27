@@ -14,7 +14,7 @@ local CHARGE_TIME = 3
 local ENERGY_RATE = 0.6
 
 local function IsLaser(Gun)
-	return IsValid(Gun) and Gun:GetClass() == "acf_gun" and Gun.Id == LASER_ID
+	return IsValid(Gun) and Gun:GetClass() == "acf_gun" and (Gun.Class == "SL" or Gun.Id == LASER_ID)
 end
 
 local function IsBatteryLinkValid(Gun, Tank)
