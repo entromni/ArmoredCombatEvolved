@@ -462,10 +462,27 @@ ACE.GSounds.GunFire     = GSoundData
 -- Existing definitions remain untouched and act as exact interpolation anchors.
 -- Continuous caliber support for all ordinary gun classes.
 -- Preset definitions remain exact anchors; interpolate only within the selected gun class.
-function ACE.GetGunCaliberBounds(GunClass)
+function ACE.GetGunSubclasses(GunClass)
+	local Subclasses = {}
+	local Seen = {}
+	for _, Definition in pairs(GunTable) do
+		if Definition.gunclass == GunClass and not Definition.rack then
+			local Name = Definition.subclass or "Standard"
+			if not Seen[Name] then
+				Seen[Name] = true
+				Subclasses[#Subclasses + 1] = Name
+			end
+		end
+	end
+	table.sort(Subclasses)
+	return Subclasses
+end
+
+function ACE.GetGunCaliberBounds(GunClass, Subclass)
 	local Minimum, Maximum
 	for _, Definition in pairs(GunTable) do
-		if Definition.gunclass == GunClass and not Definition.rack and not Definition.ACE_CustomPreset and isnumber(Definition.caliber) then
+		local DefinitionSubclass = Definition.subclass or "Standard"
+		if Definition.gunclass == GunClass and DefinitionSubclass == (Subclass or "Standard") and not Definition.rack and not Definition.ACE_CustomPreset and isnumber(Definition.caliber) then
 			Minimum = not Minimum and Definition.caliber or math.min(Minimum, Definition.caliber)
 			Maximum = not Maximum and Definition.caliber or math.max(Maximum, Definition.caliber)
 		end
@@ -473,20 +490,41 @@ function ACE.GetGunCaliberBounds(GunClass)
 	return Minimum, Maximum
 end
 
-function ACE.InterpolateGunPreset(DefinitionID, Caliber)
+function ACE.GetGunSubclassPreset(GunClass, Subclass, NearCaliber)
+	local Best, Distance
+	for _, Definition in pairs(GunTable) do
+		local DefinitionSubclass = Definition.subclass or "Standard"
+		if Definition.gunclass == GunClass and DefinitionSubclass == (Subclass or "Standard") and not Definition.rack and isnumber(Definition.caliber) then
+			local Delta = math.abs(Definition.caliber - (NearCaliber or Definition.caliber))
+			if not Distance or Delta < Distance then Best, Distance = Definition, Delta end
+		end
+	end
+	return Best
+end
+
+function ACE.InterpolateGunPreset(DefinitionID, Caliber, Subclass)
 	local Base = GunTable[DefinitionID]
 	if not Base or Base.rack or not isnumber(Base.caliber) then return Base, 1, DefinitionID end
 	Caliber = tonumber(Caliber)
 	if not Caliber then return Base, 1, DefinitionID end
+	Subclass = Subclass or Base.subclass or "Standard"
+
+	-- Switch to a preset belonging to the requested subclass before calculating
+	-- bounds or interpolating; different subclasses can have different models,
+	-- weights, ROF, magazine configuration, and caliber coverage.
+	local SubclassBase = ACE.GetGunSubclassPreset(Base.gunclass, Subclass, Caliber)
+	if not SubclassBase then return Base, 1, DefinitionID end
+	Base = SubclassBase
 
 	local Anchors = {}
 	for _, Definition in pairs(GunTable) do
-		if Definition.gunclass == Base.gunclass and not Definition.rack and not Definition.ACE_CustomPreset and isnumber(Definition.caliber) then
+		local DefinitionSubclass = Definition.subclass or "Standard"
+		if Definition.gunclass == Base.gunclass and DefinitionSubclass == Subclass and not Definition.rack and not Definition.ACE_CustomPreset and isnumber(Definition.caliber) then
 			Anchors[#Anchors + 1] = Definition
 		end
 	end
 	table.sort(Anchors, function(A, B) return A.caliber < B.caliber end)
-	if #Anchors == 0 then return Base, 1, DefinitionID end
+	if #Anchors == 0 then return Base, 1, Base.id end
 
 	Caliber = math.Clamp(Caliber, Anchors[1].caliber, Anchors[#Anchors].caliber)
 	for _, Anchor in ipairs(Anchors) do
@@ -520,19 +558,18 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber)
 
 	Result.caliber = Caliber
 	Result.model = Lower.model
+	Result.subclass = Subclass
 	Result.ACE_CustomPreset = true
 
-	-- A deterministic ID makes the custom gun and its ammo crate match on the
-	-- server and on clients that reconstruct the definition from networked data.
 	local ClassID = string.gsub(string.upper(Base.gunclass), "[^%w]", "")
-	local CaliberKey = math.Round(Caliber * 1000) -- 0.01 mm precision
-	local CustomID = string.format("ACE_Custom_%s_%d", ClassID, CaliberKey)
+	local SubclassID = string.gsub(string.upper(Subclass), "[^%w]", "")
+	local CaliberKey = math.Round(Caliber * 1000)
+	local CustomID = string.format("ACE_Custom_%s_%s_%d", ClassID, SubclassID, CaliberKey)
 	Result.id = CustomID
 	if Result.round then Result.round.id = CustomID end
-	Result.name = string.format("%.1fmm Custom %s", Caliber * 10, Base.gunclass)
+	Result.name = string.format("%.1fmm Custom %s (%s)", Caliber * 10, Base.gunclass, Subclass)
 
 	GunTable[CustomID] = Result
-
 	return Result, Caliber / Lower.caliber, CustomID
 end
 
