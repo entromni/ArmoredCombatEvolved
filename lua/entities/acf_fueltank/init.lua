@@ -494,14 +494,24 @@ function ENT:Think()
 			self.NextCookoffEffect = Now + 0.1
 		end
 
-		-- Damage nearby targets using ACE's damage pipeline. Players take burn
-		-- damage; ACF props/components/crew use chemical-type ACE damage.
+		-- The plume is blocked by solid geometry and shares a finite energy
+		-- budget. Targets are processed nearest-first; each exposed target
+		-- absorbs most of the remaining energy before anything behind it.
 		if Now >= ( self.NextCookoffDamage or 0 ) then
-			local Radius = self.CookoffDamageRadius or 100
+			local Radius = self.CookoffDamageRadius or 200
 			local Attacker = IsValid( self.Inflictor ) and self.Inflictor or self
 			local Origin = self:WorldSpaceCenter()
+			local EnergyBudget = 900 -- total ACE energy available for this damage pulse
 
-			for _, Target in ipairs( ents.FindInSphere( Origin, Radius ) ) do
+			local Targets = ents.FindInSphere( Origin, Radius )
+			table.sort( Targets, function( A, B )
+				if not IsValid( A ) then return false end
+				if not IsValid( B ) then return true end
+				return Origin:DistToSqr( A:WorldSpaceCenter() ) < Origin:DistToSqr( B:WorldSpaceCenter() )
+			end )
+
+			for _, Target in ipairs( Targets ) do
+				if EnergyBudget <= 1 then break end
 				if Target == self or not IsValid( Target ) or Target:IsWorld() then continue end
 
 				local TargetPos = Target:WorldSpaceCenter()
@@ -509,9 +519,28 @@ function ENT:Think()
 				local Falloff = 1 - math.Clamp( Distance / Radius, 0, 1 )
 				if Falloff <= 0 then continue end
 
+				-- Solid props, walls, and compartment bulkheads occlude the plume.
+				-- Ignore only the battery; a trace that hits another entity before
+				-- the candidate means that nearer entity is the absorber.
+				local Trace = util.TraceLine( {
+					start = Origin,
+					endpos = TargetPos,
+					filter = self,
+					mask = MASK_SOLID
+				} )
+
+				if Trace.Hit and Trace.Entity ~= Target then continue end
+
+				-- Allocate 70% of remaining energy to each successive exposed
+				-- target. This makes the closest objects take the brunt and leaves
+				-- only a diminishing fraction for targets farther away.
+				local AllocatedEnergy = EnergyBudget * 0.7 * Falloff
+				if AllocatedEnergy <= 1 then continue end
+				EnergyBudget = EnergyBudget - AllocatedEnergy
+
 				if Target:IsPlayer() then
 					local Info = DamageInfo()
-					Info:SetDamage( 12 * Falloff )
+					Info:SetDamage( 12 * ( AllocatedEnergy / 900 ) )
 					Info:SetDamageType( DMG_BURN )
 					Info:SetAttacker( Attacker )
 					Info:SetInflictor( self )
@@ -520,18 +549,14 @@ function ENT:Think()
 				else
 					local Activated = ACE.Check( Target )
 					if Activated then
-						-- ACF's chemical damage type goes through the same armor,
-						-- component and crew damage handlers as other ACE hits.
-						local Energy = ACE.Kinetic( 900, 0.05 * Falloff, 1500 )
+						local Energy = ACE.Kinetic( AllocatedEnergy, 0.05 * Falloff, 1500 )
 					local FrArea = 0.5 * Falloff
 					local HitRes = ACE.Damage( Target, Energy, FrArea, 0, Attacker, 0, nil, "Chem" )
 
-						-- ACE.Damage reports prop destruction but doesn't remove
-						-- directly-hit props by itself; mirror the normal hit path.
 						if HitRes and HitRes.Kill and Activated == "Prop" and not Target.SpecialDamage then
-							ACE_HEKill( Target, ( TargetPos - Origin ):GetNormalized(), Energy.Kinetic or 0, Origin )
-						end
+						ACE_HEKill( Target, ( TargetPos - Origin ):GetNormalized(), Energy.Kinetic or 0, Origin )
 					end
+				end
 				end
 			end
 
