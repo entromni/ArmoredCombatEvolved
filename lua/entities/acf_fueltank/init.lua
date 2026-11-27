@@ -494,26 +494,50 @@ function ENT:Think()
 			self.NextCookoffEffect = Now + 0.1
 		end
 
-		-- The hot plume damages nearby physics props while the battery burns.
+		-- Damage nearby targets using ACE's damage pipeline. Players take burn
+		-- damage; ACF props/components/crew use chemical-type ACE damage.
 		if Now >= ( self.NextCookoffDamage or 0 ) then
 			local Radius = self.CookoffDamageRadius or 100
 			local Attacker = IsValid( self.Inflictor ) and self.Inflictor or self
-			for _, Target in ipairs( ents.FindInSphere( self:GetPos(), Radius ) ) do
-				if Target ~= self and IsValid( Target ) and not Target:IsWorld() and not Target:IsPlayer() and not Target:IsNPC() then
-					local Phys = Target:GetPhysicsObject()
-					if IsValid( Phys ) then
-						local Distance = self:GetPos():Distance( Target:WorldSpaceCenter() )
-					local Falloff = 1 - math.Clamp( Distance / Radius, 0, 1 )
+			local Origin = self:WorldSpaceCenter()
+
+			for _, Target in ipairs( ents.FindInSphere( Origin, Radius ) ) do
+				if Target == self or not IsValid( Target ) or Target:IsWorld() then continue end
+
+				local TargetPos = Target:WorldSpaceCenter()
+				local Distance = Origin:Distance( TargetPos )
+				local Falloff = 1 - math.Clamp( Distance / Radius, 0, 1 )
+				if Falloff <= 0 then continue end
+
+				if Target:IsPlayer() then
 					local Info = DamageInfo()
 					Info:SetDamage( 12 * Falloff )
 					Info:SetDamageType( DMG_BURN )
 					Info:SetAttacker( Attacker )
 					Info:SetInflictor( self )
-					Info:SetDamagePosition( Target:WorldSpaceCenter() )
+					Info:SetDamagePosition( TargetPos )
 					Target:TakeDamageInfo( Info )
+				elseif ACE.Check( Target ) then
+					-- ACE.Damage routes this to ACF props, vehicles, and squishy
+					-- entities so their armor/health and crew damage are processed.
+					local Energy = ACE.Kinetic( 450, 0.025 * Falloff, 1500 )
+					ACE.Damage( Target, Energy, 0.1 * Falloff, 0, Attacker, 0, nil, "Chem" )
+				else
+					-- Non-ACF physics props have no ACE armor/health interface.
+					-- Use Source's acid damage type, never burn damage.
+					local Phys = Target:GetPhysicsObject()
+					if IsValid( Phys ) then
+						local Info = DamageInfo()
+						Info:SetDamage( 12 * Falloff )
+						Info:SetDamageType( DMG_ACID )
+						Info:SetAttacker( Attacker )
+						Info:SetInflictor( self )
+						Info:SetDamagePosition( TargetPos )
+						Target:TakeDamageInfo( Info )
 					end
 				end
 			end
+
 			self.NextCookoffDamage = Now + 0.25
 		end
 
