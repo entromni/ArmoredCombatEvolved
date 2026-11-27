@@ -149,6 +149,9 @@ function PANEL:Init( )
 			function ClassNode:DoClick()
 				local Definition = self.mytable
 				RunConsoleCommand("acemenu_type", Definition.type)
+				RunConsoleCommand("acemenu_id", Definition.id)
+				RunConsoleCommand("acemenu_subclass", Definition.subclass or "Standard")
+				RunConsoleCommand("acemenu_caliber", "0")
 				acemenupanel:UpdateDisplay(Definition)
 			end
 
