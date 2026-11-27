@@ -566,7 +566,9 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber, Subclass)
 	local CaliberKey = math.Round(Caliber * 1000)
 	local CustomID = string.format("ACE_Custom_%s_%s_%d", ClassID, SubclassID, CaliberKey)
 	Result.id = CustomID
-	if Result.round then Result.round.id = CustomID end
+	-- Keep ammunition identity tied to the stock preset. The generated custom ID
+	-- is reconstruction metadata, not an ACF weapon/ammo ID.
+	if Result.round then Result.round.id = Base.id end
 	Result.name = string.format("%.1fmm Custom %s (%s)", Caliber * 10, Base.gunclass, Subclass)
 
 	GunTable[CustomID] = Result
