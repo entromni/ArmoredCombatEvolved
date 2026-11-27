@@ -341,7 +341,7 @@ do
 								ScaledConvex[#ScaledConvex + 1] = Vertex * ModelScale
 						elseif istable(Vertex) and isvector(Vertex.pos) then
 								ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
-						end
+							end
 						end
 						if #ScaledConvex >= 4 then
 							ScaledConvexes[#ScaledConvexes + 1] = ScaledConvex
@@ -352,7 +352,6 @@ do
 						Gun:SetMoveType(MOVETYPE_VPHYSICS)
 						Gun:SetSolid(SOLID_VPHYSICS)
 					end
-				end
 				end
 			end
 		end
