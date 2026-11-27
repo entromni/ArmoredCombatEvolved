@@ -340,16 +340,19 @@ do
 							if isvector(Vertex) then
 								ScaledConvex[#ScaledConvex + 1] = Vertex * ModelScale
 						elseif istable(Vertex) and isvector(Vertex.pos) then
-							ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
+								ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
 						end
-					end
-					if #ScaledConvex >= 4 then ScaledConvexes[#ScaledConvexes + 1] = ScaledConvex end
+						end
+						if #ScaledConvex >= 4 then
+							ScaledConvexes[#ScaledConvexes + 1] = ScaledConvex
+						end
 					end
 					if #ScaledConvexes > 0 then
 						Gun:PhysicsInitMultiConvex(ScaledConvexes)
-					Gun:SetMoveType(MOVETYPE_VPHYSICS)
-					Gun:SetSolid(SOLID_VPHYSICS)
+						Gun:SetMoveType(MOVETYPE_VPHYSICS)
+						Gun:SetSolid(SOLID_VPHYSICS)
 					end
+				end
 				end
 			end
 		end
