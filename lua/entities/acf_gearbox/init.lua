@@ -1182,7 +1182,15 @@ function ENT:PreEntityCopy()
 	for _, Link in ipairs( self.WheelLink ) do
 		local Target = Link.Ent
 		local TargetIn = Target.IsGeartrain and Target.In or vector_origin
-		local SourceParentID, SourceOffset = SaveEndpoint( self, Link.Output )
+		local TargetWorld = Target:LocalToWorld( TargetIn )
+
+		-- A resize replaces the gearbox's In/Out attachment vectors. Link.Output
+		-- is cached and may not yet have been refreshed when the dupe is copied.
+		-- Serialize the current attachment, choosing its side from the live
+		-- target position, rather than saving a stale pre-resize output.
+		local Side = self:WorldToLocal( TargetWorld ).y < 0 and 0 or 1
+		local SourceOut = Side == 0 and self.OutL or self.OutR
+		local SourceParentID, SourceOffset = SaveEndpoint( self, SourceOut )
 		local TargetParentID, TargetOffset = SaveEndpoint( Target, TargetIn )
 		local TargetID = Target:EntIndex()
 
