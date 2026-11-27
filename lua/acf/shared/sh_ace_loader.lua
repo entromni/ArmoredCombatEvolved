@@ -527,9 +527,12 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber, Subclass)
 	if #Anchors == 0 then return Base, 1, Base.id end
 
 	Caliber = math.Clamp(Caliber, Anchors[1].caliber, Anchors[#Anchors].caliber)
+	-- Canonical size, so a gun and a crate set to the same number get the same ID:
+	-- snap to a preset within 0.05 mm, otherwise use 0.1 mm steps (units are cm).
 	for _, Anchor in ipairs(Anchors) do
-		if math.abs(Caliber - Anchor.caliber) < 0.000001 then return table.Copy(Anchor), 1, Anchor.id end
+		if math.abs(Caliber - Anchor.caliber) <= 0.005001 then return table.Copy(Anchor), 1, Anchor.id end
 	end
+	Caliber = math.Round(Caliber, 2)
 
 	local Lower, Upper
 	for Index = 1, #Anchors - 1 do
@@ -539,6 +542,14 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber, Subclass)
 		end
 	end
 	if not Lower or not Upper then return table.Copy(Base), 1, Base.id end
+
+	local ClassID = string.gsub(string.upper(Base.gunclass), "[^%w]", "")
+	local SubclassID = string.gsub(string.upper(Subclass), "[^%w]", "")
+	local CaliberKey = math.Round(Caliber * 1000)
+	local CustomID = string.format("ACE_Custom_%s_%s_%d", ClassID, SubclassID, CaliberKey)
+
+	local Existing = rawget(GunTable, CustomID)
+	if Existing then return Existing, Caliber / Lower.caliber, CustomID end
 
 	local Fraction = (Caliber - Lower.caliber) / (Upper.caliber - Lower.caliber)
 	local Result = table.Copy(Lower)
@@ -561,19 +572,47 @@ function ACE.InterpolateGunPreset(DefinitionID, Caliber, Subclass)
 	Result.subclass = Subclass
 	Result.ACE_CustomPreset = true
 
-	local ClassID = string.gsub(string.upper(Base.gunclass), "[^%w]", "")
-	local SubclassID = string.gsub(string.upper(Subclass), "[^%w]", "")
-	local CaliberKey = math.Round(Caliber * 1000)
-	local CustomID = string.format("ACE_Custom_%s_%s_%d", ClassID, SubclassID, CaliberKey)
 	Result.id = CustomID
-	-- Keep ammunition identity tied to the stock preset. The generated custom ID
-	-- is reconstruction metadata, not an ACF weapon/ammo ID.
-	if Result.round then Result.round.id = Base.id end
+	-- Crates store round.id and only link to a gun with the same ID.
+	if Result.round then Result.round.id = CustomID end
 	Result.name = string.format("%.1fmm Custom %s (%s)", Caliber * 10, Base.gunclass, Subclass)
 
 	GunTable[CustomID] = Result
 	return Result, Caliber / Lower.caliber, CustomID
 end
+
+--- Rebuilds a custom caliber definition from its ID alone.
+-- Needed for crate dupes, other clients and fresh server sessions.
+-- @param ID string An "ACE_Custom_<class>_<subclass>_<caliber>" gun ID.
+-- @return table|nil The registered definition, or nil if the ID is not valid.
+function ACE.ResolveGunID(ID)
+	if not isstring(ID) then return end
+
+	local Existing = rawget(GunTable, ID)
+	if Existing then return Existing end
+
+	local ClassID, SubclassID, CaliberKey = string.match(ID, "^ACE_Custom_(%w+)_(%w+)_(%d+)$")
+	if not ClassID then return end
+
+	local Preset
+	for _, Definition in pairs(GunTable) do
+		if not Definition.rack and not Definition.ACE_CustomPreset
+			and string.gsub(string.upper(Definition.gunclass), "[^%w]", "") == ClassID
+			and string.gsub(string.upper(Definition.subclass or "Standard"), "[^%w]", "") == SubclassID then
+			Preset = Definition
+			break
+		end
+	end
+	if not Preset then return end
+
+	-- Interpolation clamps and rounds, so an out-of-range ID comes back different.
+	ACE.InterpolateGunPreset(Preset.id, tonumber(CaliberKey) / 1000, Preset.subclass or "Standard")
+
+	return rawget(GunTable, ID)
+end
+
+-- Any lookup of an unregistered custom ID (either realm) rebuilds it on demand.
+setmetatable(GunTable, { __index = function(_, ID) return ACE.ResolveGunID(ID) end })
 
 -- Keep the cannon-named functions as compatibility wrappers for existing code.
 function ACE.GetCannonCaliberBounds()

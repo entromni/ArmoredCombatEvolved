@@ -22,14 +22,6 @@ end
 -- copied from base_wire_entity: DoNormalDraw's notip arg isn't accessible from ENT:Draw defined there.
 function ENT:Draw()
 
-	local CustomBaseID = self:GetNWString("ACE_CustomBaseID", "")
-	local CustomCaliber = self:GetNWFloat("ACE_CustomCaliber", 0)
-	local CustomSubclass = self:GetNWString("ACE_CustomSubclass", "Standard")
-	if CustomBaseID ~= "" and CustomCaliber > 0 and ACE.InterpolateGunPreset then
-		-- Reconstruct the same subclass-specific definition before overlay rendering.
-		ACE.InterpolateGunPreset(CustomBaseID, CustomCaliber, CustomSubclass)
-	end
-
 	local lply = LocalPlayer()
 	local hideBubble = not ACE_GunInfoWhileSeated:GetBool() and IsValid(lply) and lply:InVehicle()
 

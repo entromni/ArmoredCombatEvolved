@@ -220,7 +220,7 @@ do
 		Subclass = Subclass and Subclass ~= "" and Subclass or Lookup.subclass or "Standard"
 
 		-- Resolve the selected subclass to one of its own preset definitions.
-		if not Lookup.rack then
+		if not Lookup.rack and not Lookup.ACE_CustomPreset then
 			local SubclassPreset = ACE.GetGunSubclassPreset(Lookup.gunclass, Subclass, Lookup.caliber)
 			if SubclassPreset then
 				Id = SubclassPreset.id
@@ -256,11 +256,8 @@ do
 		Gun:SetPos(Pos)
 		Gun:Spawn()
 		Gun:CPPISetOwner(Owner)
-		-- Keep ACF/ACE weapon identity on a registered stock preset. The generated
-		-- custom ID is reconstruction metadata; using it as Gun.Id breaks ACF
-		-- weapon lookup and ammo-crate ID matching.
-		local WeaponID = Lookup.ACE_CustomPreset and CustomBaseID or Id
-		Gun.Id               = WeaponID
+		-- A custom gun keeps its own ID so only ammo of the same size can link.
+		Gun.Id               = Id
 		Gun.ACE_CustomGunID   = Lookup.ACE_CustomPreset and Id or nil
 		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or ""
 		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or 0
