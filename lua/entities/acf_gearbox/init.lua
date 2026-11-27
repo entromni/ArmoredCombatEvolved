@@ -328,65 +328,136 @@ function ENT:Update( ArgsTable )
 	if ModelChanged or ScaleChanged then
 		local OldModel = CurrentModel
 		local OldScale = self.ACE_ModelScale or self:GetNWFloat("ACE_ModelScale", 1)
+		local OldIn, OldOutL, OldOutR = self.In, self.OutL, self.OutR
 		local Parent = self:GetParent()
 		local HasParent = IsValid(Parent)
 		local SavedPos, SavedAng = self:GetPos(), self:GetAngles()
 		local SavedLocalPos, SavedLocalAng = self:GetLocalPos(), self:GetLocalAngles()
+		local OldPhys = self:GetPhysicsObject()
+		local SavedVelocity = IsValid(OldPhys) and OldPhys:GetVelocity() or vector_origin
+		local SavedAngleVelocity = IsValid(OldPhys) and OldPhys:GetAngleVelocity() or vector_origin
+		local SavedMotion = not IsValid(OldPhys) or OldPhys:IsMotionEnabled()
+		local SavedAsleep = IsValid(OldPhys) and OldPhys:IsAsleep()
 
-		self:SetModel(NewModel)
-		local CollisionOK
-		if NewScale == 1 then
-			self:PhysicsInit(SOLID_VPHYSICS)
-			self:SetMoveType(MOVETYPE_VPHYSICS)
-			self:SetSolid(SOLID_VPHYSICS)
-			self:EnableCustomCollisions(false)
-			CollisionOK = IsValid(self:GetPhysicsObject())
-		else
-			CollisionOK = self:ACE_ApplyScaledCollision(NewScale)
+		-- Rebuild physics while unparented. PhysicsInit can replace the physics
+		-- object and disturb a parented entity's world/local transform.
+		if HasParent then
+			self:SetParent(NULL)
+			self:SetPos(SavedPos)
+			self:SetAngles(SavedAng)
 		end
 
-		if not CollisionOK then
-			-- Roll back the model/physics together if the target collision fails.
-			self:SetModel(OldModel)
-			if OldScale == 1 then
+		local function RestoreTransformAndPhysics()
+			self:SetPos(SavedPos)
+			self:SetAngles(SavedAng)
+
+			if HasParent and IsValid(Parent) then
+				self:SetParent(Parent)
+				self:SetLocalPos(SavedLocalPos)
+				self:SetLocalAngles(SavedLocalAng)
+			end
+
+			local Phys = self:GetPhysicsObject()
+			if not IsValid(Phys) then return end
+
+			Phys:SetPos(self:GetPos())
+			Phys:SetAngles(self:GetAngles())
+			Phys:SetMass(self.Mass)
+			Phys:EnableMotion(SavedMotion)
+			Phys:SetVelocity(SavedVelocity)
+			Phys:SetAngleVelocity(SavedAngleVelocity)
+
+			if SavedAsleep then
+				Phys:Sleep()
+			else
+				Phys:Wake()
+			end
+		end
+
+		local function BuildCollision(Model, Scale)
+			self:SetModel(Model)
+
+			if Scale == 1 then
 				self:PhysicsInit(SOLID_VPHYSICS)
 				self:SetMoveType(MOVETYPE_VPHYSICS)
 				self:SetSolid(SOLID_VPHYSICS)
 				self:EnableCustomCollisions(false)
-			else
-				self:ACE_ApplyScaledCollision(OldScale)
+				return IsValid(self:GetPhysicsObject())
 			end
+
+			return self:ACE_ApplyScaledCollision(Scale)
+		end
+
+		local function RollbackResize()
+			BuildCollision(OldModel, OldScale)
+			RestoreTransformAndPhysics()
+			self.Model = OldModel
+			self.ACE_ModelScale = OldScale
+			self:SetNWFloat("ACE_ModelScale", OldScale)
+			self.In, self.OutL, self.OutR = OldIn, OldOutL, OldOutR
+		end
+
+		if not BuildCollision(NewModel, NewScale) then
+			RollbackResize()
 			return false, "Failed to rebuild gearbox collision for the selected size/model!"
 		end
 
-		-- PhysicsInit can reset a parented entity's transform. Preserve its
-		-- parent-relative placement across model/collision reconstruction.
-		if HasParent and IsValid(Parent) then
-			self:SetParent(Parent)
-			self:SetLocalPos(SavedLocalPos)
-			self:SetLocalAngles(SavedLocalAng)
-		else
-			self:SetPos(SavedPos)
-			self:SetAngles(SavedAng)
+		RestoreTransformAndPhysics()
+
+		-- If the model anchor is unchanged, the old local attachment vectors
+		-- are already valid. Scale those vectors by the ratio of the new and
+		-- old model scales instead of querying bone attachments after physics
+		-- reconstruction (which can return stale/world-origin positions).
+		local AttachmentScale = OldScale > 0 and NewScale / OldScale or nil
+		local NewIn, NewOutL, NewOutR
+
+		if NewModel == CurrentModel and AttachmentScale then
+			NewIn = isvector(OldIn) and OldIn * AttachmentScale or nil
+			NewOutL = isvector(OldOutL) and OldOutL * AttachmentScale or nil
+			NewOutR = isvector(OldOutR) and OldOutR * AttachmentScale or nil
+		end
+
+		local function GetScaledAttachment(Name)
+			local AttachmentID = self:LookupAttachment(Name)
+			if not AttachmentID or AttachmentID <= 0 then return nil end
+
+			local Attachment = self:GetAttachment(AttachmentID)
+			if not Attachment or not isvector(Attachment.Pos) then return nil end
+
+			local LocalPos = self:WorldToLocal(Attachment.Pos)
+			local Mins, Maxs = self:GetModelBounds()
+			local Radius = math.max(Mins:Length(), Maxs:Length()) + 32
+
+			-- Reject a stale attachment matrix that resolves to world origin (or
+			-- another point far outside this model). Do not turn it into a local
+			-- offset and then permanently cache that bad endpoint.
+			if not isvector(LocalPos) or LocalPos:Length() > Radius then return nil end
+
+			return LocalPos * NewScale
+		end
+
+		NewIn = NewIn or GetScaledAttachment("input")
+		NewOutL = NewOutL or GetScaledAttachment("driveshaftL")
+		NewOutR = NewOutR or GetScaledAttachment("driveshaftR")
+
+		if not isvector(NewIn) or not isvector(NewOutL) or not isvector(NewOutR) then
+			RollbackResize()
+			return false, "Gearbox resize failed: model attachments were invalid after rebuilding physics; the previous model/size was restored."
 		end
 
 		self.Model = NewModel
 		self.ACE_ModelScale = NewScale
 		self:SetNWFloat("ACE_ModelScale", NewScale)
+		self.In, self.OutL, self.OutR = NewIn, NewOutL, NewOutR
 
-
-		-- SetModel/PhysicsInit can leave server attachment transforms stale for
-		-- this frame. Cache them only after the model's bones have refreshed.
-		-- A serial prevents an older resize timer from overwriting a newer one.
-		self.ACE_LinkRefreshSerial = (self.ACE_LinkRefreshSerial or 0) + 1
-		local RefreshSerial = self.ACE_LinkRefreshSerial
+		-- Refresh the existing logical links and their keyframe-rope visuals
+		-- synchronously, using the now-valid local attachment vectors.
 		self.ACE_LinkRefreshPending = true
 
-		-- Remove old rope entities/constraints before their physics endpoints
-		-- are replaced. Keep logical WheelLink records and Wire ports intact.
 		for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
 			for _, Link in pairs(Source.WheelLink or {}) do
 				if Source ~= self and Link.Ent ~= self then continue end
+
 				if IsValid(Link.Rope) then Link.Rope:Remove() end
 				Link.Rope = nil
 
@@ -399,85 +470,50 @@ function ENT:Update( ArgsTable )
 			end
 		end
 
-		local Gearbox = self
-		timer.Simple(0.1, function()
-			if not IsValid(Gearbox) or Gearbox.ACE_LinkRefreshSerial ~= RefreshSerial then return end
+		for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
+			for _, Link in pairs(Source.WheelLink or {}) do
+				local Target = Link.Ent
+				if not IsValid(Target) then continue end
+				if Source ~= self and Target ~= self then continue end
 
-			local function GetScaledAttachment(Name)
-				local AttachmentID = Gearbox:LookupAttachment(Name)
-				if not AttachmentID or AttachmentID <= 0 then return nil end
+				local In = Target.IsGeartrain and Target.In or vector_origin
+				local InWorld = Target:LocalToWorld(In)
+				local Out = Link.Output
 
-				local Attachment = Gearbox:GetAttachment(AttachmentID)
-				if not Attachment or not isvector(Attachment.Pos) then return nil end
+				if Source == self then
+					local Side = Source:WorldToLocal(InWorld).y < 0 and 0 or 1
+					Link.Side = Side
+					Out = Side == 0 and self.OutL or self.OutR
+					Link.Output = Out
+				end
 
-				return Gearbox:WorldToLocal(Attachment.Pos) * NewScale
-			end
+				if not isvector(Out) then continue end
 
-			local NewIn = GetScaledAttachment("input")
-			local NewOutL = GetScaledAttachment("driveshaftL")
-			local NewOutR = GetScaledAttachment("driveshaftR")
+				local OutWorld = Source:LocalToWorld(Out)
+				Link.RopeLen = OutWorld:Distance(InWorld)
 
-			if not NewIn or not NewOutL or not NewOutR then
-				Gearbox.ACE_LinkRefreshPending = false
-				ErrorNoHalt("[ACE] Failed to refresh gearbox drivetrain attachments after resize: ", tostring(Gearbox.Model), "\n")
-				return
-			end
-
-			Gearbox.In = NewIn
-			Gearbox.OutL = NewOutL
-			Gearbox.OutR = NewOutR
-
-			-- Incoming links live in the upstream gearbox's WheelLink table.
-			for _, Source in ipairs(ents.FindByClass("acf_gearbox")) do
-				for _, Link in pairs(Source.WheelLink or {}) do
-					local Target = Link.Ent
-					if not IsValid(Target) then continue end
-					if Source ~= Gearbox and Target ~= Gearbox then continue end
-
-					local In = Target.IsGeartrain and Target.In or vector_origin
-					if not isvector(In) then continue end
-
-					local InWorld = Target:LocalToWorld(In)
-					local Out = Link.Output
-
-					if Source == Gearbox then
-						-- Re-select the output side from the linked entity's current
-						-- position. Saved links can retain the wrong side after a
-						-- model-anchor change or legacy dupe migration.
-						local Side = Source:WorldToLocal(InWorld).y < 0 and 0 or 1
-						Link.Side = Side
-						Out = Side == 0 and Gearbox.OutL or Gearbox.OutR
-						Link.Output = Out
-					end
-
-					if not isvector(Out) then continue end
-
-					local OutWorld = Source:LocalToWorld(Out)
-					Link.RopeLen = OutWorld:Distance(InWorld)
-
-					-- PhysicsInit replaces the target physics object. Rebuild the
-					-- cached local drivetrain axis and inertia for that new object.
+				if Target == self then
 					local Phys = Target:GetPhysicsObject()
 					if IsValid(Phys) then
 						local Axis = Phys:WorldToLocalVector(Source:GetRight())
 					Link.Axis = Axis
 					Link.Inertia = (Axis * Phys:GetInertia()):Length()
-				end
-
-					local Owner = Source:CPPIGetOwner()
-					local MakeRopes = IsValid(Owner)
-						and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
-
-					if MakeRopes then
-						Link.Rope = ACE_CreateLinkRope(OutWorld, Source, Out, Target, In)
+					Link.RopeLen = OutWorld:Distance(InWorld)
 					end
 				end
+
+				local Owner = Source:CPPIGetOwner()
+				local MakeRopes = IsValid(Owner)
+					and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
+
+				if MakeRopes then
+					Link.Rope = ACE_CreateLinkRope(OutWorld, Source, Out, Target, In)
+				end
 			end
+		end
 
-			Gearbox.ACE_LinkRefreshPending = false
-		end)
+		self.ACE_LinkRefreshPending = false
 	end
-
 	-- Weight can change even if the selected size resolves to the same model
 	-- scale, so refresh mass/inertia on every update.
 	local Phys = self:GetPhysicsObject()
