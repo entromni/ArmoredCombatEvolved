@@ -1163,48 +1163,20 @@ function ENT:PreEntityCopy()
 
 	local info = {}
 	local entids = {}
-	local linkData = {}
 
-	-- Remove invalid references before serializing links.
+	-- Store only the linked entity IDs. Parent entities and endpoint offsets
+	-- are runtime transforms and must be resolved from the freshly pasted
+	-- entities, not serialized as EntIndex-based parent data. This also
+	-- normalizes links from pre-scaling dupes when they are copied again.
 	for Key, Link in pairs( self.WheelLink ) do
 		if not IsValid( Link.Ent ) then
 			table.remove( self.WheelLink, Key )
+		else
+			table.insert( entids, Link.Ent:EntIndex() )
 		end
 	end
 
-	local function SaveEndpoint( Entity, LocalPos )
-		local Parent = Entity:GetParent()
-		if not IsValid( Parent ) then return nil, LocalPos end
-
-		return Parent:EntIndex(), Parent:WorldToLocal( Entity:LocalToWorld( LocalPos ) )
-	end
-
-	for _, Link in ipairs( self.WheelLink ) do
-		local Target = Link.Ent
-		local TargetIn = Target.IsGeartrain and Target.In or vector_origin
-		local TargetWorld = Target:LocalToWorld( TargetIn )
-
-		-- A resize replaces the gearbox's In/Out attachment vectors. Link.Output
-		-- is cached and may not yet have been refreshed when the dupe is copied.
-		-- Serialize the current attachment, choosing its side from the live
-		-- target position, rather than saving a stale pre-resize output.
-		local Side = self:WorldToLocal( TargetWorld ).y < 0 and 0 or 1
-		local SourceOut = Side == 0 and self.OutL or self.OutR
-		local SourceParentID, SourceOffset = SaveEndpoint( self, SourceOut )
-		local TargetParentID, TargetOffset = SaveEndpoint( Target, TargetIn )
-		local TargetID = Target:EntIndex()
-
-		table.insert( entids, TargetID )
-		linkData[ TargetID ] = {
-			SourceParentID = SourceParentID,
-			SourceOffset = SourceOffset,
-			TargetParentID = TargetParentID,
-			TargetOffset = TargetOffset,
-		}
-	end
-
 	info.entities = entids
-	info.links = linkData
 	duplicator.StoreEntityModifier( self, "WheelLink", info )
 
 	self.BaseClass.PreEntityCopy( self )
@@ -1213,9 +1185,6 @@ end
 
 function ENT:PostEntityPaste( Player, Ent, CreatedEntities )
 
-	-- Base class restores Wire data; gearbox links are restored synchronously
-	-- using saved parent-relative endpoints, without a timer or a race against
-	-- the later parent/constraint restoration phase.
 	self.BaseClass.PostEntityPaste( self, Player, Ent, CreatedEntities )
 
 	local Mods = Ent.EntityMods
@@ -1223,20 +1192,11 @@ function ENT:PostEntityPaste( Player, Ent, CreatedEntities )
 	if WheelLink and WheelLink.entities then
 		for _, ID in ipairs( WheelLink.entities ) do
 			local Linked = CreatedEntities[ ID ]
-			if not IsValid( Linked ) then continue end
-
-			local Saved = WheelLink.links and WheelLink.links[ ID ]
-			local Restore
-			if Saved then
-				Restore = {
-					SourceParent = Saved.SourceParentID and CreatedEntities[ Saved.SourceParentID ],
-					SourceOffset = Saved.SourceOffset,
-					TargetParent = Saved.TargetParentID and CreatedEntities[ Saved.TargetParentID ],
-					TargetOffset = Saved.TargetOffset,
-				}
+			if IsValid( Linked ) then
+				-- Recompute the rope from the current pasted entity/parent
+				-- transforms. Do not use parent EntIndex/offset snapshots.
+				self:Link( Linked )
 			end
-
-			self:Link( Linked, Restore )
 		end
 
 		Mods.WheelLink = nil
