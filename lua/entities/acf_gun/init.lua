@@ -256,7 +256,11 @@ do
 		Gun:SetPos(Pos)
 		Gun:Spawn()
 		Gun:CPPISetOwner(Owner)
-		Gun.Id               = Id
+		-- Keep ACF/ACE weapon identity on a registered stock preset. The generated
+		-- custom ID is reconstruction metadata; using it as Gun.Id breaks ACF
+		-- weapon lookup and ammo-crate ID matching.
+		local WeaponID = Lookup.ACE_CustomPreset and CustomBaseID or Id
+		Gun.Id               = WeaponID
 		Gun.ACE_CustomGunID   = Lookup.ACE_CustomPreset and Id or nil
 		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or nil
 		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or nil
@@ -348,37 +352,12 @@ do
 			Gun:SetModelScale(ModelScale, 0)
 			Gun.CannonCaliberScale = ModelScale
 		end
+
+		-- Use the model's normal VPhysics initialization after setting scale.
+		-- The previous custom hull rebuild consumed GetMeshConvexes() output,
+		-- which is not a reliable PhysicsInitMultiConvex input and could leave
+		-- the entity with invalid collision after activation.
 		Gun:PhysicsInit(SOLID_VPHYSICS)
-
-		-- Scale the actual model convexes to match the rendered custom caliber.
-		-- SetModelScale alone does not scale VPhysics collision geometry.
-		if ModelScale ~= 1 then
-			local OriginalPhysics = Gun:GetPhysicsObject()
-			local Convexes = IsValid(OriginalPhysics) and OriginalPhysics:GetMeshConvexes()
-			local ScaledConvexes = {}
-
-			if istable(Convexes) then
-				for _, Convex in ipairs(Convexes) do
-					local ScaledConvex = {}
-					for _, Vertex in ipairs(Convex) do
-						local Position = isvector(Vertex) and Vertex or (istable(Vertex) and Vertex.pos)
-						if isvector(Position) then
-							ScaledConvex[#ScaledConvex + 1] = Position * ModelScale
-						end
-					end
-					if #ScaledConvex >= 4 then
-						ScaledConvexes[#ScaledConvexes + 1] = ScaledConvex
-					end
-				end
-			end
-
-			if #ScaledConvexes > 0 then
-				Gun:PhysicsInitMultiConvex(ScaledConvexes)
-			else
-				local Min, Max = util.GetModelBounds(Gun.Model)
-				Gun:PhysicsInitBox(Min * ModelScale, Max * ModelScale)
-			end
-		end
 
 		Gun:SetMoveType( MOVETYPE_VPHYSICS )
 		Gun:SetSolid( SOLID_VPHYSICS )
@@ -397,18 +376,19 @@ do
 			end)
 		end
 
-		local phys = Gun:GetPhysicsObject()
-		if IsValid( phys ) then
-			phys:SetMass( Gun.Mass )
-			Gun.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass() -- giving a little wiggle room
-		end
-
 		Gun:UpdateOverlayText()
 
 		Owner:AddCleanup("acemenu", Gun)
 
 		ACE_Activate(Gun, 0)
 
+		-- Activation can recreate the physics object. Set final mass/inertia
+		-- after it, so the frozen toolgun spawn retains valid physics.
+		local phys = Gun:GetPhysicsObject()
+		if IsValid(phys) then
+			phys:SetMass(Gun.Mass)
+			Gun.ModelInertia = 0.99 * phys:GetInertia() / phys:GetMass()
+		end
 
 		return Gun
 
