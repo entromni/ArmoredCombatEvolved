@@ -339,7 +339,7 @@ do
 						for _, Vertex in ipairs(Convex) do
 							if isvector(Vertex) then
 								ScaledConvex[#ScaledConvex + 1] = Vertex * ModelScale
-						elseif istable(Vertex) and isvector(Vertex.pos) then
+							elseif istable(Vertex) and isvector(Vertex.pos) then
 								ScaledConvex[#ScaledConvex + 1] = Vertex.pos * ModelScale
 							end
 						end
