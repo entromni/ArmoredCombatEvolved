@@ -24,10 +24,10 @@ function ENT:Draw()
 
 	local CustomBaseID = self:GetNWString("ACE_CustomBaseID", "")
 	local CustomCaliber = self:GetNWFloat("ACE_CustomCaliber", 0)
+	local CustomSubclass = self:GetNWString("ACE_CustomSubclass", "Standard")
 	if CustomBaseID ~= "" and CustomCaliber > 0 and ACE.InterpolateGunPreset then
-		-- Register the server's custom definition locally before ACF/Wire renders
-		-- its overlay, so the custom ID resolves to real caliber/stat data.
-		ACE.InterpolateGunPreset(CustomBaseID, CustomCaliber)
+		-- Reconstruct the same subclass-specific definition before overlay rendering.
+		ACE.InterpolateGunPreset(CustomBaseID, CustomCaliber, CustomSubclass)
 	end
 
 	local lply = LocalPlayer()
