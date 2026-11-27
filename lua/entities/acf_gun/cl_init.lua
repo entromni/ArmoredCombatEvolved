@@ -95,43 +95,45 @@ function ACE_GunGUICreate( Table )
 	GunDisplay.LayoutEntity = function() end
 	acemenupanel.CustomDisplay:AddItem( GunDisplay )
 
-	-- Continuous cannon caliber slider: preserve preset IDs and interpolate the preview.
-	if Table.gunclass == "C" and not Table.rack then
-		local Minimum, Maximum = ACE.GetCannonCaliberBounds()
-		local PreviewLabel = vgui.Create("DLabel", acemenupanel.CustomDisplay)
-		PreviewLabel:SetDark(true)
-		PreviewLabel:SetWrap(true)
-		PreviewLabel:SetAutoStretchVertical(true)
-		PreviewLabel:SetSize(acemenupanel.CustomDisplay:GetWide(), 42)
+	-- Every ordinary gun class gets a continuous caliber slider. Rack-based
+	-- ordnance has its own sizing/configuration and deliberately skips this control.
+	if not Table.rack and isnumber(Table.caliber) then
+		local Minimum, Maximum = ACE.GetGunCaliberBounds(Table.gunclass)
+		if Minimum and Maximum and Minimum > 0 and Maximum >= Minimum then
+			local PreviewLabel = vgui.Create("DLabel", acemenupanel.CustomDisplay)
+			PreviewLabel:SetDark(true)
+			PreviewLabel:SetWrap(true)
+			PreviewLabel:SetAutoStretchVertical(true)
+			PreviewLabel:SetSize(acemenupanel.CustomDisplay:GetWide(), 42)
 
-		local CaliberSlider = vgui.Create("DNumSlider", acemenupanel.CustomDisplay)
-		CaliberSlider:SetText("Continuous caliber (mm)")
-		CaliberSlider:SetMin(Minimum * 10)
-		CaliberSlider:SetMax(Maximum * 10)
-		CaliberSlider:SetDecimals(1)
-		CaliberSlider:SetSize(acemenupanel.CustomDisplay:GetWide(), 35)
-		CaliberSlider.OnValueChanged = function(_, Millimeters)
-			Millimeters = math.Clamp(Millimeters, Minimum * 10, Maximum * 10)
-			RunConsoleCommand("acemenu_caliber", string.format("%.1f", Millimeters))
-			local Preview, ModelScale = ACE.InterpolateCannonPreset(Table.id, Millimeters / 10)
-			if not Preview then return end
-			PreviewLabel:SetText(string.format(
-				"Preview: %.1fmm | %.0fkg | shell length %.1fcm | propellant %.2fkg | max %.1f RPM",
-				Preview.caliber * 10, Preview.weight or 0,
-				Preview.round and Preview.round.maxlength or 0,
-				Preview.round and Preview.round.propweight or 0,
-				Preview.maxrof or 0
-			))
-			if IsValid(GunDisplay.Entity) then
-				GunDisplay:SetModel(Preview.model)
-				if IsValid(GunDisplay.Entity) then GunDisplay.Entity:SetModelScale(ModelScale, 0) end
+			local CaliberSlider = vgui.Create("DNumSlider", acemenupanel.CustomDisplay)
+			CaliberSlider:SetText("Continuous caliber (mm)")
+			CaliberSlider:SetMin(Minimum * 10)
+			CaliberSlider:SetMax(Maximum * 10)
+			CaliberSlider:SetDecimals(1)
+			CaliberSlider:SetSize(acemenupanel.CustomDisplay:GetWide(), 35)
+			CaliberSlider.OnValueChanged = function(_, Millimeters)
+				Millimeters = math.Clamp(Millimeters, Minimum * 10, Maximum * 10)
+				RunConsoleCommand("acemenu_caliber", string.format("%.1f", Millimeters))
+				local Preview, ModelScale = ACE.InterpolateGunPreset(Table.id, Millimeters / 10)
+				if not Preview then return end
+				PreviewLabel:SetText(string.format(
+					"Preview: %.1fmm | %.1fkg | %s",
+					Preview.caliber * 10, Preview.weight or 0, Preview.name or Table.name
+				))
+				if IsValid(GunDisplay.Entity) then
+					GunDisplay:SetModel(Preview.model)
+					if IsValid(GunDisplay.Entity) then GunDisplay.Entity:SetModelScale(ModelScale, 0) end
+				end
 			end
+			acemenupanel.CustomDisplay:AddItem(CaliberSlider)
+			acemenupanel.CustomDisplay:AddItem(PreviewLabel)
+			CaliberSlider:SetValue(Table.caliber * 10)
+		else
+			RunConsoleCommand("acemenu_caliber", "0")
 		end
-		acemenupanel.CustomDisplay:AddItem(CaliberSlider)
-		acemenupanel.CustomDisplay:AddItem(PreviewLabel)
-		CaliberSlider:SetValue(Table.caliber * 10)
 	else
-		-- Prevent the previous cannon selection's size from leaking into another class.
+		-- Prevent the previous ordinary gun's selected caliber leaking into racks.
 		RunConsoleCommand("acemenu_caliber", "0")
 	end
 
