@@ -30,7 +30,7 @@ ACE.ManuCost = ACE.ManuCost or {
 	-- armor: $ per TON of prop mass, by armor material (composite/exotic >> steel)
 	armor_per_ton = { RHA = 14000.0, CHA = 16000.0, Alum = 20000.0, Ti = 90000.0,
 	                  Cer = 120000.0, DU = 180000.0, ERA = 60000.0, Rub = 5000.0,
-	                  Texto = 25000.0 },
+	                  Texto = 25000.0, Graph = 500000.0, Aero = 1000000.0, Diam = 10000000.0 },
 	-- engines: $ per hp by fuel/type (turbines/multifuel premium)
 	engine_per_hp = { Petrol = 250.0, Diesel = 350.0, Multifuel = 500.0, Electric = 400.0 },
 	-- guns: $ = gun_cal_sq * caliber_mm^2 * class factor (feed-system complexity; utility

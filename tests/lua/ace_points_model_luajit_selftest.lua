@@ -7,6 +7,15 @@ function ACE.IsEnt(value) return value ~= nil end
 
 dofile(root .. "/lua/acf/shared/sh_ace_points_model.lua")
 
+-- New armor material pricing keys must be explicit (unknown IDs fall back to RHA).
+local grapheneKE, grapheneHEAT = ACE.Points.MaterialEff("Graph")
+assert(grapheneKE == 2.1 and grapheneHEAT == 1.7, "graphene composite pricing missing")
+local aerogelKE, aerogelHEAT = ACE.Points.MaterialEff("Aero")
+assert(aerogelKE == 0.02 and aerogelHEAT == 0.5, "aerogel pricing missing")
+local diamondKE, diamondHEAT = ACE.Points.MaterialEff("Diam")
+assert(diamondKE == 2.4 and diamondHEAT == 1.5, "diamond composite pricing missing")
+
+
 local empty = { Type = "APHE", maxPen = 200, FrArea = math.pi * 5 ^ 2, blastMass = 0 }
 local loaded = { Type = "APHE", maxPen = 200, FrArea = math.pi * 5 ^ 2, blastMass = 60 }
 
