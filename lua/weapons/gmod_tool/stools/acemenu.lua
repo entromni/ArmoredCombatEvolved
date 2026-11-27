@@ -9,6 +9,8 @@ TOOL.ConfigName		= ""
 TOOL.ClientConVar[ "type" ] = "gun"
 TOOL.ClientConVar[ "id" ] = "7.62mmMG" --Used by guns and crates (as example)
 TOOL.ClientConVar[ "caliber" ] = "0" -- Custom gun caliber in millimeters; 0 keeps the selected preset.
+TOOL.ClientConVar[ "baseid" ] = "" -- Original preset ID for custom-caliber duplication.
+TOOL.ClientConVar[ "subclass" ] = "" -- Selected gun subclass, when applicable.
 
 TOOL.ClientConVar[ "data1" ] = "7.62mmMG"
 TOOL.ClientConVar[ "data2" ] = "AP"
