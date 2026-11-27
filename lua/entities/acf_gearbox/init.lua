@@ -321,9 +321,6 @@ function ENT:Update( ArgsTable )
 		local OldScale = self.ACE_ModelScale or 1
 
 		self:SetModel(NewModel)
-		-- SetModel invalidates the model's bone/attachment cache. Rebuild it
-		-- before reading drivetrain attachment positions for the resized model.
-		self:SetupBones()
 		local CollisionOK
 		if NewScale == 1 then
 			self:PhysicsInit(SOLID_VPHYSICS)
@@ -349,8 +346,6 @@ function ENT:Update( ArgsTable )
 			return false, "Failed to rebuild gearbox collision for the selected size/model!"
 		end
 
-		-- PhysicsInit / custom collision rebuilding can invalidate bone matrices too.
-		self:SetupBones()
 		self.Model = NewModel
 		self.ACE_ModelScale = NewScale
 		self:SetNWFloat("ACE_ModelScale", NewScale)
