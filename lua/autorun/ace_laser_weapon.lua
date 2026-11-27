@@ -12,6 +12,11 @@ local FIRE_INTERVAL = 0.1
 local CHARGE_TIME = 3
 -- kWh consumed per second at Power=1.0 (Power ramps from 0.55 to 1.8).
 local ENERGY_RATE = 0.6
+local CALIBER_ANCHOR = 5.0
+
+local function GetCaliberScale(Gun)
+	return math.max((Gun.Caliber or CALIBER_ANCHOR) / CALIBER_ANCHOR, 0.1)
+end
 
 local function IsLaser(Gun)
 	return IsValid(Gun) and Gun:GetClass() == "acf_gun" and (Gun.Class == "SL" or Gun.Id == LASER_ID)
@@ -182,7 +187,9 @@ local function FireLaser(Gun)
 
 	local Charge = math.Clamp(((Gun.ACELaserCharge or 0) + Delta) / CHARGE_TIME, 0, 1)
 	local Power = Lerp(Charge, 0.55, 1.8)
-	local Requested = ENERGY_RATE * Power * Delta
+	local CaliberScale = GetCaliberScale(Gun)
+	local CaliberAreaScale = CaliberScale * CaliberScale
+	local Requested = ENERGY_RATE * Power * CaliberAreaScale * Delta
 	local Supplied, Available = ConsumeBatteryCharge(Gun, Requested)
 
 	if Supplied <= 0 or Delta <= 0 then
@@ -222,12 +229,13 @@ local function FireLaser(Gun)
 	Effect:SetStart(Start)
 	Effect:SetOrigin(End)
 	Effect:SetScale(Power)
+	Effect:SetMagnitude(CaliberScale)
 	util.Effect("ace_laser_beam", Effect, true, true)
 
 	if EffectiveDelta >= 0.015 and Trace.Hit and IsValid(Trace.Entity) and ACE.Check(Trace.Entity) then
 		local Target = Trace.Entity
 		local Fraction = math.Clamp(EffectiveDelta / FIRE_INTERVAL, 0, 1)
-		local BeamMass = 0.16 * Power * Fraction
+		local BeamMass = 0.16 * Power * CaliberAreaScale * Fraction
 		local Energy = ACE.Kinetic(900 * 39.37, BeamMass, 500)
 		local Area = 0.65
 		local HitAngle = math.deg(math.acos(math.Clamp(Trace.HitNormal:Dot(-Direction), -1, 1)))
