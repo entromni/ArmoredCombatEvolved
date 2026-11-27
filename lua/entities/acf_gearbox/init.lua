@@ -332,7 +332,6 @@ function ENT:Update( ArgsTable )
 		local Parent = self:GetParent()
 		local HasParent = IsValid(Parent)
 		local SavedPos, SavedAng = self:GetPos(), self:GetAngles()
-		local SavedLocalPos, SavedLocalAng = self:GetLocalPos(), self:GetLocalAngles()
 		local OldPhys = self:GetPhysicsObject()
 		local SavedVelocity = IsValid(OldPhys) and OldPhys:GetVelocity() or vector_origin
 		local SavedAngleVelocity = IsValid(OldPhys) and OldPhys:GetAngleVelocity() or vector_origin
@@ -353,8 +352,11 @@ function ENT:Update( ArgsTable )
 
 			if HasParent and IsValid(Parent) then
 				self:SetParent(Parent)
-				self:SetLocalPos(SavedLocalPos)
-				self:SetLocalAngles(SavedLocalAng)
+				-- Restore in world space. The saved local coordinates were
+				-- captured relative to the old parent transform and can be
+				-- invalid after detaching/rebuilding physics.
+				self:SetPos(SavedPos)
+				self:SetAngles(SavedAng)
 			end
 
 			local Phys = self:GetPhysicsObject()
