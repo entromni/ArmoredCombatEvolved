@@ -458,5 +458,70 @@ ACE.MuzzleFlashes           = MuzzleFlashTable
 ACE.Weapons.Mobility    = MobilityTable
 
 ACE.GSounds.GunFire     = GSoundData
+-- Continuous cannon caliber support. Added for the preset-interpolation size menu.
+-- Existing definitions remain untouched and act as exact interpolation anchors.
+function ACE.GetCannonCaliberBounds()
+	local Minimum, Maximum
+	for _, Definition in pairs(GunTable) do
+		if Definition.gunclass == "C" and isnumber(Definition.caliber) then
+			Minimum = not Minimum and Definition.caliber or math.min(Minimum, Definition.caliber)
+			Maximum = not Maximum and Definition.caliber or math.max(Maximum, Definition.caliber)
+		end
+	end
+	return Minimum, Maximum
+end
+
+function ACE.InterpolateCannonPreset(DefinitionID, Caliber)
+	local Base = GunTable[DefinitionID]
+	if not Base or Base.gunclass ~= "C" then return Base, 1, DefinitionID end
+	Caliber = tonumber(Caliber)
+	if not Caliber then return Base, 1, DefinitionID end
+
+	local Anchors = {}
+	for _, Definition in pairs(GunTable) do
+		if Definition.gunclass == "C" and isnumber(Definition.caliber) then Anchors[#Anchors + 1] = Definition end
+	end
+	table.sort(Anchors, function(A, B) return A.caliber < B.caliber end)
+	if #Anchors == 0 then return Base, 1, DefinitionID end
+
+	Caliber = math.Clamp(Caliber, Anchors[1].caliber, Anchors[#Anchors].caliber)
+	for _, Anchor in ipairs(Anchors) do
+		if math.abs(Caliber - Anchor.caliber) < 0.000001 then return table.Copy(Anchor), 1, Anchor.id end
+	end
+
+	local Lower, Upper
+	for Index = 1, #Anchors - 1 do
+		if Caliber > Anchors[Index].caliber and Caliber < Anchors[Index + 1].caliber then
+			Lower, Upper = Anchors[Index], Anchors[Index + 1]
+			break
+		end
+	end
+	if not Lower or not Upper then return table.Copy(Base), 1, Base.id end
+
+	local Fraction = (Caliber - Lower.caliber) / (Upper.caliber - Lower.caliber)
+	local Result = table.Copy(Lower)
+	local Discrete = { id = true, year = true, caliber = true, magsize = true, magreload = true }
+	local function InterpolateTable(Target, A, B)
+		for Key, ValueA in pairs(A) do
+			local ValueB = B[Key]
+			if isnumber(ValueA) and isnumber(ValueB) and not Discrete[Key] then
+				Target[Key] = Lerp(Fraction, ValueA, ValueB)
+			elseif istable(ValueA) and istable(ValueB) then
+				Target[Key] = table.Copy(ValueA)
+				InterpolateTable(Target[Key], ValueA, ValueB)
+			end
+		end
+	end
+	InterpolateTable(Result, Lower, Upper)
+
+	Result.caliber = Caliber
+	Result.id = Lower.id
+	if Result.round then Result.round.id = Lower.id end
+	Result.name = string.format("%.1fmm Custom Cannon", Caliber * 10)
+	Result.model = Lower.model
+	-- The lower anchor model is scaled between presets; exact presets keep their original model.
+	return Result, Caliber / Lower.caliber, Lower.id
+end
+
 ACE.ModelData           = ModelData
 ACE.MineData            = MineData
