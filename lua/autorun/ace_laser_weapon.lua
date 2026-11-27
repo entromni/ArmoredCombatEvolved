@@ -273,7 +273,38 @@ local function FireLaser(Gun)
 		local HitAngle = math.deg(math.acos(math.Clamp(Trace.HitNormal:Dot(-Direction), -1, 1)))
 		local Owner = IsValid(Gun.User) and Gun.User or Gun:CPPIGetOwner()
 
+		-- Resolve the beam through ACE first so armor/material interaction and
+		-- non-penetrating armor degradation remain authentic.
+		local HealthBefore = Target.ACF and Target.ACF.Health
+		local ArmourBefore = Target.ACF and Target.ACF.Armour
 		local HitRes = ACE_Damage(Target, Energy, Area, HitAngle, Owner, Trace.PhysicsBone or 0, Gun, "HEAT")
+
+		-- Lasers ablate structure/health much more aggressively than they wear
+		-- down the armor value. Add extra structural damage after ACE's armor
+		-- resolution, and only apply a fraction of the corresponding armor loss.
+		-- This is not penetration: the beam still stops at the first traced hit.
+		if HitRes and not HitRes.Kill and IsValid(Target) and Target.ACF
+			and isnumber(HealthBefore) and isnumber(Target.ACF.Health)
+			and isnumber(Target.ACF.MaxHealth) and Target.ACF.MaxHealth > 0
+			and isnumber(ArmourBefore) and isnumber(Target.ACF.Armour) then
+			local BaseDamage = math.max(HealthBefore - Target.ACF.Health, 0)
+			local ExtraDamage = BaseDamage * 4 -- 5x total health damage versus ACE's resolved damage.
+			local HealthAfter = math.max(Target.ACF.Health - ExtraDamage, 0)
+			local ArmorAtHealth = Target.ACF.MaxArmour * (0.5 + HealthAfter / Target.ACF.MaxHealth / 2)
+			local NaturalArmorDrop = math.max(Target.ACF.Armour - ArmorAtHealth, 0)
+
+			Target.ACF.Health = HealthAfter
+			Target.ACF.Armour = math.max(Target.ACF.Armour - NaturalArmorDrop * 0.2, 0)
+			if Target.ACF.PrHealth then
+				ACE.UpdateVisualHealth(Target)
+			end
+			Target.ACF.PrHealth = Target.ACF.Health
+
+			if Target.ACF.Health <= 0 then
+				HitRes.Kill = true
+			end
+		end
+
 		if HitRes and HitRes.Kill and IsValid(Target) then
 			ACE_APKill(Target, Direction, Energy.Kinetic)
 		end
