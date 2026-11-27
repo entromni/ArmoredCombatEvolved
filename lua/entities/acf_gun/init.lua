@@ -262,8 +262,9 @@ do
 		local WeaponID = Lookup.ACE_CustomPreset and CustomBaseID or Id
 		Gun.Id               = WeaponID
 		Gun.ACE_CustomGunID   = Lookup.ACE_CustomPreset and Id or nil
-		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or nil
-		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or nil
+		Gun.ACE_CustomBaseID = Lookup.ACE_CustomPreset and CustomBaseID or ""
+		Gun.ACE_CustomCaliber = Lookup.ACE_CustomPreset and Lookup.caliber or 0
+		Gun.ACE_DupeCaliber = Lookup.ACE_CustomPreset and (Lookup.caliber * 10) or 0
 		Gun.ACE_CustomSubclass = Subclass
 		Gun.Caliber         = Lookup.caliber
 		Gun.Model           = Lookup.model
@@ -410,7 +411,7 @@ end
 
 -- Include continuous caliber in tool updates and duplicator arguments.
 list.Set( "ACFCvars", "acf_gun", {"id", "caliber", "baseid", "subclass"} )
-duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id", "Caliber", "BaseId", "Subclass")
+duplicator.RegisterEntityClass("acf_gun", ACE_MakeGun, "Pos", "Angle", "Id", "ACE_DupeCaliber", "ACE_CustomBaseID", "ACE_CustomSubclass")
 
 function ENT:UpdateOverlayText()
 
