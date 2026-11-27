@@ -129,23 +129,30 @@ function PANEL:Init( )
 
 	local Guns = HomeNode:AddNode( "Guns" , "icon16/attach.png" ) --Guns folder
 
-	for _,Class in pairs(self.GunClasses["GunClass"]) do
-
-		local SubNode = Guns:AddNode( Class.name or "No Name" , ItemIcon )
-
-		for _, Ent in pairs(FinalContainer["Guns"]) do
+	-- Guns now stop at the gun-class node. Clicking a class opens its default
+	-- definition directly in the information panel (including class-specific
+	-- controls such as the continuous cannon caliber slider), instead of nesting
+	-- every individual preset under the class.
+	for _, Class in ipairs(self.GunClasses["GunClass"]) do
+		local DefaultDefinition
+		for _, Ent in ipairs(FinalContainer["Guns"]) do
 			if Ent.gunclass == Class.id then
-
-				local EndNode = SubNode:AddNode( Ent.name or "No Name")
-				EndNode.mytable = Ent
-
-				function EndNode:DoClick()
-					RunConsoleCommand( "acemenu_type", self.mytable.type )
-					acemenupanel:UpdateDisplay( self.mytable )
-				end
-
-				EndNode.Icon:SetImage( "icon16/newspaper.png" )
+				DefaultDefinition = Ent
+				break
 			end
+		end
+
+		if DefaultDefinition then
+			local ClassNode = Guns:AddNode(Class.name or Class.id, ItemIcon)
+			ClassNode.mytable = DefaultDefinition
+
+			function ClassNode:DoClick()
+				local Definition = self.mytable
+				RunConsoleCommand("acemenu_type", Definition.type)
+				acemenupanel:UpdateDisplay(Definition)
+			end
+
+			ClassNode.Icon:SetImage(ItemIcon2)
 		end
 	end
 
