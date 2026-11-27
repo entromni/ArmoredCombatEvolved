@@ -86,9 +86,13 @@ function ENT:CalcAbsolutePosition( Position, Angles )
 end
 
 function ENT:Think()
+	-- Match the gun's client order: let the base entity update first, then
+	-- rebuild custom collision/render state from the latest networked model/scale.
+	local Result = self.BaseClass.Think( self )
+
 	UpdateGearboxScale( self )
 
-	return self.BaseClass.Think( self )
+	return Result
 end
 
 function ACE_GearboxGUICreate( Table )
