@@ -285,6 +285,9 @@ function ENT:Update( ArgsTable )
 		Wire_TriggerOutput( self, "Entity", self )
 	end
 
+	-- Refresh the selected gearbox's weight even when its ID is unchanged.
+	self.Mass = GearboxData.weight or self.Mass or 1
+
 	-- Apply a requested size change without replacing the gearbox entity.
 	-- The model must remain the same, but its custom collision and attachment
 	-- offsets need to be rebuilt for the new uniform scale.
