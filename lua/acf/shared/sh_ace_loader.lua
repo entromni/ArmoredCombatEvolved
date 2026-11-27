@@ -494,7 +494,7 @@ function ACE.GetGunSubclassPreset(GunClass, Subclass, NearCaliber)
 	local Best, Distance
 	for _, Definition in pairs(GunTable) do
 		local DefinitionSubclass = Definition.subclass or "Standard"
-		if Definition.gunclass == GunClass and DefinitionSubclass == (Subclass or "Standard") and not Definition.rack and isnumber(Definition.caliber) then
+		if Definition.gunclass == GunClass and DefinitionSubclass == (Subclass or "Standard") and not Definition.rack and not Definition.ACE_CustomPreset and isnumber(Definition.caliber) then
 			local Delta = math.abs(Definition.caliber - (NearCaliber or Definition.caliber))
 			if not Distance or Delta < Distance then Best, Distance = Definition, Delta end
 		end
