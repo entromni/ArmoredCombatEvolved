@@ -228,9 +228,20 @@ function ENT:Update( ArgsTable )
 
 	local Id = ArgsTable[4] -- Argtable[4] is the engine ID
 	local GearboxData = GearboxTable[Id]
+	if not GearboxData then
+		return false, "Invalid gearbox selection!"
+	end
 
-	if GearboxData.model ~= self.Model then
-		return false, "The new gearbox must have the same model!"
+	-- Procedural sizes can switch between stock anchor models (e.g. small to
+	-- medium) while remaining the same gearbox subtype. Validate category and
+	-- subtype instead of requiring the model path to remain identical.
+	local PreviousData = GearboxTable[self.Id]
+	local SameSubtype = PreviousData
+		and PreviousData.category == GearboxData.category
+		and ACE.GetGearboxSubtype(PreviousData) == ACE.GetGearboxSubtype(GearboxData)
+
+	if not SameSubtype and GearboxData.model ~= self.Model then
+		return false, "The new gearbox must have the same model or gearbox type/subtype!"
 	end
 
 	if self.Id ~= Id then
@@ -288,31 +299,67 @@ function ENT:Update( ArgsTable )
 	-- Refresh the selected gearbox's weight even when its ID is unchanged.
 	self.Mass = GearboxData.weight or self.Mass or 1
 
-	-- Apply a requested size change without replacing the gearbox entity.
-	-- The model must remain the same, but its custom collision and attachment
-	-- offsets need to be rebuilt for the new uniform scale.
+	-- A size change may cross an anchor boundary, changing the underlying
+	-- stock model (small/medium/large). Rebuild whenever either model or scale
+	-- changes, not only when the numeric scale changes.
+	local NewModel = GearboxData.model
 	local NewScale = GearboxData.ACE_ModelScale or 1
-	if NewScale ~= self.ACE_ModelScale then
+	local ModelChanged = NewModel ~= self.Model
+	local ScaleChanged = NewScale ~= (self.ACE_ModelScale or 1)
+
+	if ModelChanged or ScaleChanged then
+		local OldModel = self.Model
+		local OldScale = self.ACE_ModelScale or 1
+
+		self:SetModel(NewModel)
+		local CollisionOK
 		if NewScale == 1 then
 			self:PhysicsInit(SOLID_VPHYSICS)
 			self:SetMoveType(MOVETYPE_VPHYSICS)
 			self:SetSolid(SOLID_VPHYSICS)
 			self:EnableCustomCollisions(false)
-		elseif not self:ACE_ApplyScaledCollision(NewScale) then
-			return false, "Failed to rebuild gearbox collision for the new size!"
+			CollisionOK = IsValid(self:GetPhysicsObject())
+		else
+			CollisionOK = self:ACE_ApplyScaledCollision(NewScale)
 		end
 
+		if not CollisionOK then
+			-- Roll back the model/physics together if the target collision fails.
+			self:SetModel(OldModel)
+			if OldScale == 1 then
+				self:PhysicsInit(SOLID_VPHYSICS)
+				self:SetMoveType(MOVETYPE_VPHYSICS)
+				self:SetSolid(SOLID_VPHYSICS)
+				self:EnableCustomCollisions(false)
+			else
+				self:ACE_ApplyScaledCollision(OldScale)
+			end
+			return false, "Failed to rebuild gearbox collision for the selected size/model!"
+		end
+
+		self.Model = NewModel
 		self.ACE_ModelScale = NewScale
 		self:SetNWFloat("ACE_ModelScale", NewScale)
 
-		-- Recalculate the model-space connection points from the unscaled model.
-		self.In = self:WorldToLocal(self:GetAttachment(self:LookupAttachment("input")).Pos) * NewScale
-		self.OutL = self:WorldToLocal(self:GetAttachment(self:LookupAttachment("driveshaftL")).Pos) * NewScale
-		self.OutR = self:WorldToLocal(self:GetAttachment(self:LookupAttachment("driveshaftR")).Pos) * NewScale
+		-- Attachments are model-space positions. Re-read them after SetModel,
+		-- then apply the new uniform scale.
+		local function GetScaledAttachment(Name)
+			local AttachmentID = self:LookupAttachment(Name)
+			local Attachment = AttachmentID and self:GetAttachment(AttachmentID)
+			if not Attachment then return vector_origin end
+			return self:WorldToLocal(Attachment.Pos) * NewScale
+		end
 
-		-- Existing drivetrain links belong to this entity; keep them connected
-		-- while updating their output points and rope lengths for the new size.
-		for _, Link in pairs(self.WheelLink) do
+		self.In = GetScaledAttachment("input")
+		self.OutL = GetScaledAttachment("driveshaftL")
+		self.OutR = GetScaledAttachment("driveshaftR")
+
+		-- Keep existing drivetrain links attached to the resized gearbox.
+		local Owner = self:CPPIGetOwner()
+		local MakeRopes = IsValid(Owner) and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
+		for _, Link in pairs(self.WheelLink or {}) do
+			if not IsValid(Link.Ent) then continue end
+
 			local Out = Link.Side == 0 and self.OutL or self.OutR
 			local OutWorld = self:LocalToWorld(Out)
 			local In = Link.Ent.IsGeartrain and Link.Ent.In or vector_origin
@@ -322,16 +369,18 @@ function ENT:Update( ArgsTable )
 			Link.Output = Out
 			Link.RopeLen = (OutWorld - InWorld):Length()
 			Link.Rope = nil
-			if self:CPPIGetOwner():GetInfoNum("ace_mobility_rope_links", 1) == 1 then
+			if MakeRopes then
 				Link.Rope = ACE_CreateLinkRope(OutWorld, self, Out, Link.Ent, In)
 			end
 		end
+	end
 
-		local Phys = self:GetPhysicsObject()
-		if IsValid(Phys) then
-			Phys:SetMass(self.Mass)
-			self.ModelInertia = 0.99 * Phys:GetInertia() / Phys:GetMass()
-		end
+	-- Weight can change even if the selected size resolves to the same model
+	-- scale, so refresh mass/inertia on every update.
+	local Phys = self:GetPhysicsObject()
+	if IsValid(Phys) then
+		Phys:SetMass(self.Mass)
+		self.ModelInertia = 0.99 * Phys:GetInertia() / Phys:GetMass()
 	end
 
 	if self.CVT then
