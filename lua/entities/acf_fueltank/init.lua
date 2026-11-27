@@ -501,7 +501,7 @@ function ENT:Think()
 			local Radius = self.CookoffDamageRadius or 200
 			local Attacker = IsValid( self.Inflictor ) and self.Inflictor or self
 			local Origin = self:WorldSpaceCenter()
-			local EnergyBudget = 900 -- total ACE energy available for this damage pulse
+			local EnergyBudget = 8 -- kJ of chemical energy available per pulse
 
 			local Targets = ents.FindInSphere( Origin, Radius )
 			table.sort( Targets, function( A, B )
@@ -549,7 +549,11 @@ function ENT:Think()
 				else
 					local Activated = ACE.Check( Target )
 					if Activated then
-						local Energy = ACE.Kinetic( AllocatedEnergy, 0.05 * Falloff, 1500 )
+						-- ACE.Kinetic expects projectile speed in inches/sec and
+						-- mass in kg, not an energy value. Convert allocated
+						-- kJ to an equivalent 1 kg energy packet first.
+						local Speed = 39.37 * math.sqrt( AllocatedEnergy * 2000 )
+						local Energy = ACE.Kinetic( Speed, 1, 99999 )
 					local FrArea = 0.5 * Falloff
 					local HitRes = ACE.Damage( Target, Energy, FrArea, 0, Attacker, 0, nil, "Chem" )
 
