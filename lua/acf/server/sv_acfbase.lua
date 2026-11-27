@@ -611,7 +611,7 @@ end
 	This one is more simple than the original function.
 	Creates a rope without any constraint
 ------------------------------------------------------------------------]]
-function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2 )
+function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints )
 
 	-- keyframe_rope can fail to resolve offsets on parented entities after
 	-- their physics object is rebuilt. Bind a parented endpoint to its parent
@@ -626,8 +626,10 @@ function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2 )
 		return Parent, Parent:WorldToLocal( WorldPos )
 	end
 
-	Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1 )
-	Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2 )
+	if not ExactEndpoints then
+		Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1 )
+		Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2 )
+	end
 
 	local rope = ents.Create( "keyframe_rope" )
 	if not IsValid( rope ) then return end
