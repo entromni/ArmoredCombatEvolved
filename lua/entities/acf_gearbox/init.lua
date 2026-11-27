@@ -386,7 +386,13 @@ function ENT:Update( ArgsTable )
 				local Attachment = self:GetAttachment(AttachmentID)
 				if not Attachment or not isvector(Attachment.Pos) then return nil end
 
-				local LocalPos = self:WorldToLocal(Attachment.Pos)
+				-- Entity:WorldToLocal can produce a bad offset for restored,
+				-- parented entities whose world transform is far from the map
+				-- origin. Convert the world-space attachment using the entity's
+				-- explicit world origin and world angle instead.
+				local LocalPos = Attachment.Pos - self:GetPos()
+				LocalPos:Rotate(-self:GetAngles())
+
 				local Mins, Maxs = self:GetModelBounds()
 				local Radius = math.max(Mins:Length(), Maxs:Length()) + 32
 				if not isvector(LocalPos) or LocalPos:Length() > Radius then return nil end
