@@ -113,7 +113,7 @@ local function InstallGunLinkSupport()
 
 	if OriginalPaste then
 		GunENT.PostEntityPaste = function(Gun, Player, Entity, CreatedEntities)
-			local LinkData = Gun.EntityMods and Gun.EntityMods.ACE_LaserBatteryLink
+			local LinkData = Entity.EntityMods and Entity.EntityMods.ACE_LaserBatteryLink
 			OriginalPaste(Gun, Player, Entity, CreatedEntities)
 
 			if IsLaser(Gun) and LinkData and istable(LinkData.entities) then
