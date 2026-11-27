@@ -1,4 +1,7 @@
 --define the class
+	subclass = "Countermeasure Launcher",
+	subclass = "Smoke Launcher",
+	subclass = "Smoke Launcher",
 ACE.DefineGunClass("SL", {
 	type		= "Gun",
 	spread		= 0.2,
