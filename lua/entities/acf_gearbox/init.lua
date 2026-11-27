@@ -329,8 +329,7 @@ function ENT:Update( ArgsTable )
 		local OldModel = CurrentModel
 		local OldScale = self.ACE_ModelScale or self:GetNWFloat("ACE_ModelScale", 1)
 		local OldIn, OldOutL, OldOutR = self.In, self.OutL, self.OutR
-		local Parent = self:GetParent()
-		local HasParent = IsValid(Parent)
+		local HasParent = IsValid(self:GetParent())
 		local SavedPos, SavedAng = self:GetPos(), self:GetAngles()
 		local OldPhys = self:GetPhysicsObject()
 		local SavedVelocity = IsValid(OldPhys) and OldPhys:GetVelocity() or vector_origin
@@ -338,23 +337,16 @@ function ENT:Update( ArgsTable )
 		local SavedMotion = not IsValid(OldPhys) or OldPhys:IsMotionEnabled()
 		local SavedAsleep = IsValid(OldPhys) and OldPhys:IsAsleep()
 
-		-- Rebuild physics while unparented. PhysicsInit can replace the physics
-		-- object and disturb a parented entity's world/local transform.
-		if HasParent then
-			self:SetParent(NULL)
-			self:SetPos(SavedPos)
-			self:SetAngles(SavedAng)
-		end
-
+		-- Do not detach/reparent a physics gearbox during resize. SetParent()
+		-- computes a new local origin from the parent transform; on old dupe
+		-- assemblies that transform can be far outside the valid local-origin
+		-- range (the repeated Bad SetLocalOrigin Z value). PhysicsInit can
+		-- rebuild the collision in place without changing the parent relation.
 		local function RestoreTransformAndPhysics()
-			self:SetPos(SavedPos)
-			self:SetAngles(SavedAng)
-
-			if HasParent and IsValid(Parent) then
-				self:SetParent(Parent)
-				-- Restore in world space. The saved local coordinates were
-				-- captured relative to the old parent transform and can be
-				-- invalid after detaching/rebuilding physics.
+			-- Only restore the entity transform when it is not parented. For a
+			-- parented entity, GetPos/SetPos semantics during physics rebuild
+			-- can mix parent-local and world coordinates and recreate the error.
+			if not HasParent then
 				self:SetPos(SavedPos)
 				self:SetAngles(SavedAng)
 			end
@@ -362,8 +354,6 @@ function ENT:Update( ArgsTable )
 			local Phys = self:GetPhysicsObject()
 			if not IsValid(Phys) then return end
 
-			Phys:SetPos(self:GetPos())
-			Phys:SetAngles(self:GetAngles())
 			Phys:SetMass(self.Mass)
 			Phys:EnableMotion(SavedMotion)
 			Phys:SetVelocity(SavedVelocity)
