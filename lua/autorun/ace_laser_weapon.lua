@@ -64,6 +64,7 @@ local function InstallGunLinkSupport()
 	local OriginalLink = GunENT.Link
 	local OriginalUnlink = GunENT.Unlink
 	local OriginalPaste = GunENT.PostEntityPaste
+	local OriginalHeatFunction = GunENT.Heat_Function
 
 	GunENT.Link = function(Gun, Target)
 		if IsLaser(Gun) and IsValid(Target) and Target:GetClass() == "acf_fueltank" then
@@ -131,6 +132,21 @@ local function InstallGunLinkSupport()
 						if IsValid(Linked) then Gun:Link(Linked) end
 					end
 				end)
+			end
+		end
+	end
+
+	if OriginalHeatFunction then
+		GunENT.Heat_Function = function(Gun, ...)
+			OriginalHeatFunction(Gun, ...)
+			if IsLaser(Gun) then
+				-- ACE's base heat logic deliberately exempts >=100 mm guns from
+				-- the overheat flag. Laser variants must still overheat and take
+				-- the standard ACE overheat damage, but this does not gate firing.
+				Gun.IsOverheated = (Gun.Heat or ACE.AmbientTemp) > 200
+				if Wire_TriggerOutput then
+					Wire_TriggerOutput(Gun, "OverHeat", Gun.IsOverheated and 1 or 0)
+				end
 			end
 		end
 	end
