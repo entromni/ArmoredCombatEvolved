@@ -328,10 +328,11 @@ local MATERIAL_EFF = {
 	ERA   = { 2.5,    8.0 },
 	Rub   = { 0.05,   3.0 },
 	Texto = { 0.5,    1.2 },
-	-- Fictional composites: these mirror their authored armor effectiveness values.
-	Graph = { 2.1,    1.7 },
-	Aero  = { 0.02,   0.5 },
-	Diam  = { 2.4,    1.5 },
+	-- Sci-fi materials use premium point-tier coefficients in this existing armor model.
+	-- These are ACE pricing coefficients, not claims of real ballistic performance.
+	Graph = { 4.5,    4.0 },
+	Aero  = { 2.2,    2.2 },
+	Diam  = { 5.0,    4.5 },
 }
 
 local function materialEff(mat)
