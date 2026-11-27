@@ -196,6 +196,19 @@ local function ConsumeBatteryCharge(Gun, Requested)
 			local Take = math.min(math.max(Tank.Fuel or 0, 0), Remaining)
 			Tank.Fuel = math.max(Tank.Fuel - Take, 0)
 			Remaining = Remaining - Take
+
+			-- Laser drain is another battery discharge path. Apply the same
+			-- permanent 1% end-of-life cutoff used by ACE's fuel-tank system
+			-- immediately, rather than waiting for the tank's next Think tick
+			-- or for an engine/refueller to inspect it.
+			local RatedCapacity = Tank.OriginalCapacity or Tank.Capacity or 0
+			local Cutoff = RatedCapacity * 0.01
+			if RatedCapacity > 0 and Tank.Fuel <= Cutoff then
+				Tank.Fuel = 0
+				Tank.CookoffSpent = true
+				if Tank.UpdateOverlayText then Tank:UpdateOverlayText() end
+			end
+
 			if Tank.UpdateFuelMass then Tank:UpdateFuelMass() end
 		end
 	end
