@@ -114,7 +114,7 @@ local function StartBatteryCookoff( self, Inflictor )
 	self.CookoffLastThink = CurTime()
 	self.NextCookoffEffect = 0
 	self.NextCookoffDamage = 0
-	self.CookoffDamageRadius = math.max( math.sqrt( self.ACF.Area or 0 ) * 2, 100 )
+	self.CookoffDamageRadius = math.Clamp( math.max( math.sqrt( self.ACF.Area or 0 ) * 6, self:BoundingRadius() * 5, 200 ), 200, 500 )
 
 	if not self.CookoffSoundStarted then
 		-- This is a looped Source fire ambience; EmitSound broadcasts it to clients.
@@ -517,23 +517,20 @@ function ENT:Think()
 					Info:SetInflictor( self )
 					Info:SetDamagePosition( TargetPos )
 					Target:TakeDamageInfo( Info )
-				elseif ACE.Check( Target ) then
-					-- ACE.Damage routes this to ACF props, vehicles, and squishy
-					-- entities so their armor/health and crew damage are processed.
-					local Energy = ACE.Kinetic( 450, 0.025 * Falloff, 1500 )
-					ACE.Damage( Target, Energy, 0.1 * Falloff, 0, Attacker, 0, nil, "Chem" )
 				else
-					-- Non-ACF physics props have no ACE armor/health interface.
-					-- Use Source's acid damage type, never burn damage.
-					local Phys = Target:GetPhysicsObject()
-					if IsValid( Phys ) then
-						local Info = DamageInfo()
-						Info:SetDamage( 12 * Falloff )
-						Info:SetDamageType( DMG_ACID )
-						Info:SetAttacker( Attacker )
-						Info:SetInflictor( self )
-						Info:SetDamagePosition( TargetPos )
-						Target:TakeDamageInfo( Info )
+					local Activated = ACE.Check( Target )
+					if Activated then
+						-- ACF's chemical damage type goes through the same armor,
+						-- component and crew damage handlers as other ACE hits.
+						local Energy = ACE.Kinetic( 900, 0.05 * Falloff, 1500 )
+					local FrArea = 0.5 * Falloff
+					local HitRes = ACE.Damage( Target, Energy, FrArea, 0, Attacker, 0, nil, "Chem" )
+
+						-- ACE.Damage reports prop destruction but doesn't remove
+						-- directly-hit props by itself; mirror the normal hit path.
+						if HitRes and HitRes.Kill and Activated == "Prop" and not Target.SpecialDamage then
+							ACE_HEKill( Target, ( TargetPos - Origin ):GetNormalized(), Energy.Kinetic or 0, Origin )
+						end
 					end
 				end
 			end
