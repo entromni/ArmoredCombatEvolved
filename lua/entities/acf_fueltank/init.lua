@@ -501,7 +501,8 @@ function ENT:Think()
 			local Radius = self.CookoffDamageRadius or 200
 			local Attacker = IsValid( self.Inflictor ) and self.Inflictor or self
 			local Origin = self:WorldSpaceCenter()
-			local EnergyBudget = 8 -- kJ of chemical energy available per pulse
+			local BaseEnergyBudget = 8 -- kJ of chemical energy available per pulse
+			local EnergyBudget = BaseEnergyBudget
 
 			local Targets = ents.FindInSphere( Origin, Radius )
 			table.sort( Targets, function( A, B )
@@ -540,7 +541,7 @@ function ENT:Think()
 
 				if Target:IsPlayer() then
 					local Info = DamageInfo()
-					Info:SetDamage( 12 * ( AllocatedEnergy / 900 ) )
+					Info:SetDamage( 12 * math.Clamp( AllocatedEnergy / BaseEnergyBudget, 0, 1 ) )
 					Info:SetDamageType( DMG_BURN )
 					Info:SetAttacker( Attacker )
 					Info:SetInflictor( self )
