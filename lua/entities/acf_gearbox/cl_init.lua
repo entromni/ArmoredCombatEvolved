@@ -19,6 +19,20 @@ function ENT:Draw()
 
 end
 
+-- Client physics is a visual/collision proxy. PhysicsInit replaces it and can
+-- leave the new object at its default origin until CalcAbsolutePosition runs.
+-- Synchronize immediately as well, so parented gearboxes and attached ropes do
+-- not briefly (or persistently) resolve their endpoints at world origin.
+local function SyncGearboxPhysics( Gearbox )
+	local Phys = Gearbox:GetPhysicsObject()
+	if not IsValid( Phys ) then return end
+
+	Phys:SetPos( Gearbox:GetPos() )
+	Phys:SetAngles( Gearbox:GetAngles() )
+	Phys:EnableMotion( false )
+	Phys:Sleep()
+end
+
 -- Applies custom size collision and visuals. Checked from Think so it also
 -- covers late joiners, model changes and a client physics object that was lost.
 local function UpdateGearboxScale( Gearbox )
@@ -38,6 +52,7 @@ local function UpdateGearboxScale( Gearbox )
 			local Mins, Maxs = Gearbox:GetModelBounds()
 			Gearbox:SetRenderBounds( Mins, Maxs )
 			Gearbox:DrawShadow( true )
+			SyncGearboxPhysics( Gearbox )
 
 			Gearbox.ACE_AppliedScale = nil
 			Gearbox.ACE_AppliedModel = nil
@@ -56,8 +71,7 @@ local function UpdateGearboxScale( Gearbox )
 
 	local Phys = Gearbox:GetPhysicsObject()
 	if not IsValid( Phys ) then return end
-	Phys:EnableMotion( false )
-	Phys:Sleep()
+	SyncGearboxPhysics( Gearbox )
 
 	local Mat = Matrix()
 	Mat:Scale( Vector( Scale, Scale, Scale ) )
@@ -74,13 +88,7 @@ end
 function ENT:CalcAbsolutePosition( Position, Angles )
 	if not self.ACE_AppliedScale then return end
 
-	local Phys = self:GetPhysicsObject()
-	if IsValid( Phys ) then
-		Phys:SetPos( self:GetPos() )
-		Phys:SetAngles( self:GetAngles() )
-		Phys:EnableMotion( false )
-		Phys:Sleep()
-	end
+	SyncGearboxPhysics( self )
 
 	return Position, Angles
 end
