@@ -534,7 +534,17 @@ function ENT:Update( ArgsTable )
 					and Owner:GetInfoNum("ace_mobility_rope_links", 1) == 1
 
 				if MakeRopes then
-					Link.Rope = ACE_CreateLinkRope(OutWorld, Source, Out, Target, In)
+					-- Keyframe rope offsets are relative to each endpoint's
+					-- physics object, not the entity's origin. Scaled/custom
+					-- gearbox collision can give those transforms a different
+					-- origin, so convert the actual world endpoints through the
+					-- corresponding PhysObjs before creating the visual rope.
+					local SourcePhys = Source:GetPhysicsObject()
+					local TargetPhys = Target:GetPhysicsObject()
+					local RopeOut = IsValid(SourcePhys) and SourcePhys:WorldToLocal(OutWorld) or Out
+					local RopeIn = IsValid(TargetPhys) and TargetPhys:WorldToLocal(InWorld) or In
+
+					Link.Rope = ACE_CreateLinkRope(OutWorld, Source, RopeOut, Target, RopeIn)
 				end
 			end
 		end
@@ -1087,7 +1097,15 @@ function ENT:Link( Target )
 
 	local Rope = nil
 	if self:CPPIGetOwner():GetInfoNum( "ace_mobility_rope_links", 1) == 1 then
-		Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
+		-- keyframe_rope attachment offsets are physics-object local.
+		-- Convert the entity-local drivetrain endpoints through world space
+		-- so custom gearbox collision origins cannot send a rope to (0, 0, 0).
+		local SourcePhys = self:GetPhysicsObject()
+		local TargetPhys = Target:GetPhysicsObject()
+		local RopeOut = IsValid(SourcePhys) and SourcePhys:WorldToLocal(OutPosWorld) or OutPos
+		local RopeIn = IsValid(TargetPhys) and TargetPhys:WorldToLocal(InPosWorld) or InPos
+
+		Rope = ACE_CreateLinkRope( OutPosWorld, self, RopeOut, Target, RopeIn )
 	end
 
 	local Phys	= Target:GetPhysicsObject()
