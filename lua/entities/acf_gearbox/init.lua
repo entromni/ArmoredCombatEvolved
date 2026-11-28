@@ -1107,7 +1107,13 @@ function ENT:Link( Target, RopeRestore )
 			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or RopeRestore.SourceLocal
 			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or RopeRestore.TargetLocal
 
-			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true, self, Target )
+			-- Saved parent references can be absent in a paste operation.
+			-- In that case SourceEnt/TargetEnt fall back to the live gearbox
+			-- or target; let ACE_CreateLinkRope resolve their current parent
+			-- chain instead of forcing entity-local offsets onto a parented
+			-- endpoint. This is especially important for the rope START
+			-- endpoint (the gearbox output).
+			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, nil, self, Target )
 		else
 			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
 		end
