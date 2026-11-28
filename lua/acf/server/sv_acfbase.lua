@@ -613,33 +613,43 @@ end
 ------------------------------------------------------------------------]]
 function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, OwnerEnt1, OwnerEnt2 )
 
-	-- keyframe_rope can fail to resolve offsets on parented entities after
-	-- their physics object is rebuilt. Bind a parented endpoint to its parent
-	-- instead, converting the actual endpoint through world space.
+	-- CreateKeyframeRope's StartOffset/EndOffset are relative to the endpoint's
+	-- physics object, not its entity origin. Callers provide entity-local
+	-- attachment positions, so resolve them through world space first.
 	local OriginalEnt1, OriginalEnt2 = Ent1, Ent2
 
-	local function ResolveEndpoint( Ent, LocalPos )
-		local Parent = Ent:GetParent()
-		if not IsValid( Parent ) then return Ent, LocalPos end
-
-		-- Resolve to the highest valid parent, not just the immediate one.
-		-- Dupes from older builds can have nested parenting; attaching the
-		-- keyframe rope to an intermediate parent can leave it at its paste
-		-- transform when that parent's own parent is restored/moved.
+	local function ResolveEndpoint( Ent, LocalPos, ResolveParent )
 		local WorldPos = Ent:LocalToWorld( LocalPos )
-		local Root = Parent
 
-		while IsValid( Root:GetParent() ) do
-			Root = Root:GetParent()
+		if ResolveParent then
+			local Parent = Ent:GetParent()
+			if IsValid( Parent ) then
+				-- Resolve to the highest valid parent, not just the immediate one.
+				-- This keeps the endpoint attached to the root of nested parent
+				-- chains, including when the child's physics object is rebuilt.
+				local Root = Parent
+
+				while IsValid( Root:GetParent() ) do
+					Root = Root:GetParent()
+				end
+
+				Ent = Root
+			end
 		end
 
-		return Root, Root:WorldToLocal( WorldPos )
+		local Phys = Ent:GetPhysicsObject()
+		if IsValid( Phys ) then
+			return Ent, Phys:WorldToLocal( WorldPos )
+		end
+
+		-- Non-physics endpoints have no PhysObj coordinate system.
+		return Ent, Ent:WorldToLocal( WorldPos )
 	end
 
-	if not ExactEndpoints then
-		Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1 )
-		Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2 )
-	end
+	-- ExactEndpoints skips parent resolution, but the offsets still need to
+	-- be converted into the selected entity's physics-object coordinate space.
+	Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1, not ExactEndpoints )
+	Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2, not ExactEndpoints )
 
 	local rope = ents.Create( "keyframe_rope" )
 	if not IsValid( rope ) then return end
