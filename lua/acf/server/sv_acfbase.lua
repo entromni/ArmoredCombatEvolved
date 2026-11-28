@@ -613,27 +613,38 @@ end
 ------------------------------------------------------------------------]]
 function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, OwnerEnt1, OwnerEnt2 )
 
-	-- Keep each endpoint attached to the actual entity supplied by the caller.
-	-- Resolving a parent here makes the start point depend on the root parent's
-	-- physics frame; that frame can stop matching the parented gearbox while
-	-- the assembly is moving/unfrozen.
+	-- keyframe_rope offsets are relative to the endpoint physics objects.
+	-- Callers normally provide entity-local attachment positions; convert
+	-- those through world space and bind to the highest parent when present.
+	-- Restore calls can instead pass already-physics-local offsets directly.
 	local OriginalEnt1, OriginalEnt2 = Ent1, Ent2
 
-	local function GetPhysicsLocalPos( Ent, LocalPos )
+	local function ResolveEndpoint( Ent, LocalPos )
 		local WorldPos = Ent:LocalToWorld( LocalPos )
-		local Phys = Ent:GetPhysicsObject()
+		local Parent = Ent:GetParent()
 
-		-- keyframe_rope offsets are relative to the selected entity's physics
-		-- object. Use the actual endpoint PhysObj, never a resolved root parent.
-		if IsValid( Phys ) then
-			return Phys:WorldToLocal( WorldPos )
+		if IsValid( Parent ) then
+			local Root = Parent
+
+			while IsValid( Root:GetParent() ) do
+				Root = Root:GetParent()
+			end
+
+			Ent = Root
 		end
 
-		return Ent:WorldToLocal( WorldPos )
+		local Phys = Ent:GetPhysicsObject()
+		if IsValid( Phys ) then
+			return Ent, Phys:WorldToLocal( WorldPos )
+		end
+
+		return Ent, Ent:WorldToLocal( WorldPos )
 	end
 
-	LPos1 = GetPhysicsLocalPos( Ent1, LPos1 )
-	LPos2 = GetPhysicsLocalPos( Ent2, LPos2 )
+	if not ExactEndpoints then
+		Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1 )
+		Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2 )
+	end
 
 	local rope = ents.Create( "keyframe_rope" )
 	if not IsValid( rope ) then return end
@@ -662,6 +673,8 @@ function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, Owne
 
 	OriginalEnt1:DeleteOnRemove( rope )
 	OriginalEnt2:DeleteOnRemove( rope )
+	if Ent1 ~= OriginalEnt1 then Ent1:DeleteOnRemove( rope ) end
+	if Ent2 ~= OriginalEnt2 then Ent2:DeleteOnRemove( rope ) end
 
 	return rope
 
