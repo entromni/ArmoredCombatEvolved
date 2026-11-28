@@ -1173,11 +1173,18 @@ function ENT:PreEntityCopy()
 		local Parent = Entity:GetParent()
 		local WorldPos = Entity:LocalToWorld( LocalPos )
 
-		if IsValid( Parent ) then
-			return Parent:EntIndex(), Parent:WorldToLocal( WorldPos ), LocalPos
+		if not IsValid( Parent ) then
+			return nil, LocalPos, LocalPos
 		end
 
-		return nil, LocalPos, LocalPos
+		-- Match ACE_CreateLinkRope: keyframe_rope endpoints on parented
+		-- entities must be anchored to the highest parent, not an
+		-- intermediate entity in a nested parent chain.
+		while IsValid( Parent:GetParent() ) do
+			Parent = Parent:GetParent()
+		end
+
+		return Parent:EntIndex(), Parent:WorldToLocal( WorldPos ), LocalPos
 	end
 
 	for Key, Link in pairs( self.WheelLink ) do
