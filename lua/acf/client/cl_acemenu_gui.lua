@@ -252,32 +252,24 @@ function PANEL:Init( )
 
 		-------------------- Gearbox folder --------------------
 
-		--Creates the gearbox category
-		for _, GearboxData in pairs(FinalContainer["Gearboxes"]) do
+		-- One node per gearbox type. Subtype and size are chosen inside its menu.
+		for _, GearboxData in ipairs(FinalContainer["Gearboxes"]) do
 
-			local category = GearboxData.category
+			local category = GearboxData.category or "Missing?"
 
-			if not GearboxCatNodes[category] then
+			if not GearboxCatNodes[category] and not GearboxData.ACE_CustomPreset then
 
-				local Node = Gearboxes:AddNode(category or "Missing?" , ItemIcon)
-
+				local Node = Gearboxes:AddNode(category, ItemIcon)
 				GearboxCatNodes[category] = Node
 
-			end
-		end
+				function Node:DoClick()
+					-- Open on the first subtype at Medium size.
+					local Subtype = ACE.GetGearboxSubtypes(GearboxData.category)[1]
+					local Anchors = Subtype and ACE.GetGearboxAnchors(GearboxData.category, Subtype.Key)
+					local Definition = Anchors and ACE.InterpolateGearboxPreset(Anchors[1].id, 1) or GearboxData
 
-		--Populates gearbox categories
-		for _, GearboxData in pairs(FinalContainer["Gearboxes"]) do
-
-			local name = GearboxData.name or "Missing Name"
-			local category = GearboxData.category or ""
-
-			if GearboxCatNodes[category] then
-				local Item = GearboxCatNodes[category]:AddNode( name, ItemIcon )
-
-				function Item:DoClick()
-				RunConsoleCommand( "acemenu_type", GearboxData.type )
-				acemenupanel:UpdateDisplay( GearboxData )
+					RunConsoleCommand( "acemenu_type", Definition.type )
+					acemenupanel:UpdateDisplay( Definition )
 				end
 			end
 		end
