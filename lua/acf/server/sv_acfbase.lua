@@ -613,43 +613,27 @@ end
 ------------------------------------------------------------------------]]
 function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, OwnerEnt1, OwnerEnt2 )
 
-	-- CreateKeyframeRope's StartOffset/EndOffset are relative to the endpoint's
-	-- physics object, not its entity origin. Callers provide entity-local
-	-- attachment positions, so resolve them through world space first.
+	-- Keep each endpoint attached to the actual entity supplied by the caller.
+	-- Resolving a parent here makes the start point depend on the root parent's
+	-- physics frame; that frame can stop matching the parented gearbox while
+	-- the assembly is moving/unfrozen.
 	local OriginalEnt1, OriginalEnt2 = Ent1, Ent2
 
-	local function ResolveEndpoint( Ent, LocalPos, ResolveParent )
+	local function GetPhysicsLocalPos( Ent, LocalPos )
 		local WorldPos = Ent:LocalToWorld( LocalPos )
-
-		if ResolveParent then
-			local Parent = Ent:GetParent()
-			if IsValid( Parent ) then
-				-- Resolve to the highest valid parent, not just the immediate one.
-				-- This keeps the endpoint attached to the root of nested parent
-				-- chains, including when the child's physics object is rebuilt.
-				local Root = Parent
-
-				while IsValid( Root:GetParent() ) do
-					Root = Root:GetParent()
-				end
-
-				Ent = Root
-			end
-		end
-
 		local Phys = Ent:GetPhysicsObject()
+
+		-- keyframe_rope offsets are relative to the selected entity's physics
+		-- object. Use the actual endpoint PhysObj, never a resolved root parent.
 		if IsValid( Phys ) then
-			return Ent, Phys:WorldToLocal( WorldPos )
+			return Phys:WorldToLocal( WorldPos )
 		end
 
-		-- Non-physics endpoints have no PhysObj coordinate system.
-		return Ent, Ent:WorldToLocal( WorldPos )
+		return Ent:WorldToLocal( WorldPos )
 	end
 
-	-- ExactEndpoints skips parent resolution, but the offsets still need to
-	-- be converted into the selected entity's physics-object coordinate space.
-	Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1, not ExactEndpoints )
-	Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2, not ExactEndpoints )
+	LPos1 = GetPhysicsLocalPos( Ent1, LPos1 )
+	LPos2 = GetPhysicsLocalPos( Ent2, LPos2 )
 
 	local rope = ents.Create( "keyframe_rope" )
 	if not IsValid( rope ) then return end
@@ -672,15 +656,12 @@ function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, Owne
 	rope:Spawn()
 	rope:Activate()
 
-	-- Keep cleanup tied to the actual gearbox/prop endpoints even when
-	-- the rope itself is attached to their parent entities.
+	-- Keep cleanup tied to the actual gearbox/prop endpoints.
 	OriginalEnt1 = IsValid( OwnerEnt1 ) and OwnerEnt1 or OriginalEnt1
 	OriginalEnt2 = IsValid( OwnerEnt2 ) and OwnerEnt2 or OriginalEnt2
 
 	OriginalEnt1:DeleteOnRemove( rope )
 	OriginalEnt2:DeleteOnRemove( rope )
-	if Ent1 ~= OriginalEnt1 then Ent1:DeleteOnRemove( rope ) end
-	if Ent2 ~= OriginalEnt2 then Ent2:DeleteOnRemove( rope ) end
 
 	return rope
 
