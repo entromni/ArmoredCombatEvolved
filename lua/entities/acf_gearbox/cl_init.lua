@@ -19,92 +19,67 @@ function ENT:Draw()
 
 end
 
--- Client physics is a visual/collision proxy. PhysicsInit replaces it and can
--- leave the new object at its default origin until CalcAbsolutePosition runs.
--- Synchronize immediately as well, so parented gearboxes and attached ropes do
--- not briefly (or persistently) resolve their endpoints at world origin.
-local function SyncGearboxPhysics( Gearbox )
-	local Phys = Gearbox:GetPhysicsObject()
-	if not IsValid( Phys ) then return end
-
-	Phys:SetPos( Gearbox:GetPos() )
-	Phys:SetAngles( Gearbox:GetAngles() )
-	Phys:EnableMotion( false )
-	Phys:Sleep()
-end
-
--- Applies custom size collision and visuals. Checked from Think so it also
--- covers late joiners, model changes and a client physics object that was lost.
+-- Applies custom size visuals and a client hit box. Checked from Think so it
+-- also covers late joiners and model changes.
+-- No client physics object is created: link ropes must see the same kind of
+-- entity as a stock gearbox, or their start point can end up detached.
 local function UpdateGearboxScale( Gearbox )
 	local Scale = Gearbox:GetNWFloat( "ACE_ModelScale", 1 )
-	local Model = Gearbox:GetModel()
 
-	-- Custom scaling must be explicitly cleared when returning to a stock size.
-	-- Otherwise the old RenderMultiply matrix and custom client collision remain.
 	if Scale == 1 then
-		if Gearbox.ACE_AppliedScale or Gearbox.ACE_AppliedModel then
-			-- Stock gearboxes have no client physics object.
-			Gearbox:PhysicsDestroy()
+		-- Undo the scaling if this gearbox was resized back to a preset size.
+		if Gearbox.ACE_AppliedScale then
+			Gearbox.ACE_AppliedScale = nil
+			Gearbox.ACE_AppliedModel = nil
 			Gearbox:EnableCustomCollisions( false )
 			Gearbox:DisableMatrix( "RenderMultiply" )
 
 			local Mins, Maxs = Gearbox:GetModelBounds()
+			Gearbox:SetCollisionBounds( Mins, Maxs )
 			Gearbox:SetRenderBounds( Mins, Maxs )
 			Gearbox:DrawShadow( true )
-
-			Gearbox.ACE_AppliedScale = nil
-			Gearbox.ACE_AppliedModel = nil
 		end
 
 		return
 	end
 
-	-- The model can change at an anchor boundary while the numeric scale stays
-	-- the same. Include the model in the cache key so its collision is rebuilt.
-	if Gearbox.ACE_AppliedScale == Scale
-	and Gearbox.ACE_AppliedModel == Model
-	and IsValid( Gearbox:GetPhysicsObject() ) then return end
+	-- The model can change while the numeric scale stays the same.
+	local Model = Gearbox:GetModel()
+	if Gearbox.ACE_AppliedScale == Scale and Gearbox.ACE_AppliedModel == Model then return end
 
-	if not Gearbox:ACE_ApplyScaledCollision( Scale ) then return end
-
-	local Phys = Gearbox:GetPhysicsObject()
-	if not IsValid( Phys ) then return end
-	SyncGearboxPhysics( Gearbox )
+	local Mins, Maxs = Gearbox:GetModelBounds()
+	if not Mins then return end
+	Mins, Maxs = Mins * Scale, Maxs * Scale
 
 	local Mat = Matrix()
 	Mat:Scale( Vector( Scale, Scale, Scale ) )
 	Gearbox:EnableMatrix( "RenderMultiply", Mat )
-	Gearbox:SetRenderBounds( Gearbox:GetCollisionBounds() )
+	Gearbox:SetRenderBounds( Mins, Maxs )
+	Gearbox:SetCollisionBounds( Mins, Maxs )
+	Gearbox:EnableCustomCollisions( true ) -- Makes client traces use TestCollision
 	Gearbox:DrawShadow( false )
 
+	Gearbox.ACE_ScaledMins = Mins
+	Gearbox.ACE_ScaledMaxs = Maxs
 	Gearbox.ACE_AppliedScale = Scale
 	Gearbox.ACE_AppliedModel = Model
 end
 
--- The client physics object does not follow the entity by itself.
--- Unscaled gearboxes return nothing and keep default behaviour.
-function ENT:CalcAbsolutePosition( Position, Angles )
+-- Client traces (such as the info overlay) hit a box of the scaled size.
+-- Physgun and tool traces run on the server against the scaled collision mesh.
+function ENT:TestCollision( Start, Delta )
 	if not self.ACE_AppliedScale then return end
 
-	SyncGearboxPhysics( self )
+	local HitPos, Normal, Fraction = util.IntersectRayWithOBB( Start, Delta, self:GetPos(), self:GetAngles(), self.ACE_ScaledMins, self.ACE_ScaledMaxs )
+	if not HitPos then return end
 
-	return Position, Angles
+	return { HitPos = HitPos, Normal = Normal, Fraction = Fraction }
 end
 
 function ENT:Think()
-	-- Match the gun's client order: let the base entity update first, then
-	-- rebuild custom collision/render state from the latest networked model/scale.
 	local Result = self.BaseClass.Think( self )
 
 	UpdateGearboxScale( self )
-
-	-- Link ropes anchored here appear to follow the client physics object, and
-	-- CalcAbsolutePosition alone does not keep it moving (parented gearboxes).
-	if self.ACE_AppliedScale then
-		SyncGearboxPhysics( self )
-		self:SetNextClientThink( CurTime() )
-		return true
-	end
 
 	return Result
 end

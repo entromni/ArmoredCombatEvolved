@@ -3,7 +3,7 @@ DEFINE_BASECLASS( "base_wire_entity" )
 ENT.PrintName = "ACF Gearbox"
 ENT.WireDebugName = "ACF Gearbox"
 
---- Rebuilds this gearbox's collision mesh at a uniform scale. Used on both realms.
+--- Rebuilds this gearbox's collision mesh at a uniform scale. Server only.
 -- @param Scale number Uniform scale relative to the unscaled model.
 -- @return boolean True if the scaled physics object was created.
 function ENT:ACE_ApplyScaledCollision(Scale)
