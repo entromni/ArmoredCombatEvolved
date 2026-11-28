@@ -1095,28 +1095,10 @@ function ENT:Link( Target, RopeRestore )
 
 	local Rope = nil
 	if self:CPPIGetOwner():GetInfoNum( "ace_mobility_rope_links", 1) == 1 then
-		if RopeRestore then
-			-- Saved parent offsets are already in the parent entity's local
-			-- space. Attach directly to those entities; resolving the endpoint
-			-- through the gearbox's current parent during PostEntityPaste
-			-- double-transforms it and depends on parenting having finished.
-			local HasSourceParent = IsValid( RopeRestore.SourceParent )
-			local HasTargetParent = IsValid( RopeRestore.TargetParent )
-			local SourceEnt = HasSourceParent and RopeRestore.SourceParent or self
-			local TargetEnt = HasTargetParent and RopeRestore.TargetParent or Target
-			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or RopeRestore.SourceLocal
-			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or RopeRestore.TargetLocal
-
-			-- Saved parent references can be absent in a paste operation.
-			-- In that case SourceEnt/TargetEnt fall back to the live gearbox
-			-- or target; let ACE_CreateLinkRope resolve their current parent
-			-- chain instead of forcing entity-local offsets onto a parented
-			-- endpoint. This is especially important for the rope START
-			-- endpoint (the gearbox output).
-			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, nil, self, Target )
-		else
-			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
-		end
+		-- Bind the visual directly to the gearbox and linked component.
+		-- ACE_CreateLinkRope converts these entity-local points to each
+		-- endpoint's own physics-object space.
+		Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos, true, self, Target )
 	end
 
 	local Phys	= Target:GetPhysicsObject()
