@@ -1096,14 +1096,18 @@ function ENT:Link( Target, RopeRestore )
 	local Rope = nil
 	if self:CPPIGetOwner():GetInfoNum( "ace_mobility_rope_links", 1) == 1 then
 		if RopeRestore then
+			-- Saved parent offsets are already in the parent entity's local
+			-- space. Attach directly to those entities; resolving the endpoint
+			-- through the gearbox's current parent during PostEntityPaste
+			-- double-transforms it and depends on parenting having finished.
 			local HasSourceParent = IsValid( RopeRestore.SourceParent )
 			local HasTargetParent = IsValid( RopeRestore.TargetParent )
 			local SourceEnt = HasSourceParent and RopeRestore.SourceParent or self
 			local TargetEnt = HasTargetParent and RopeRestore.TargetParent or Target
-			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or OutPos
-			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or InPos
+			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or RopeRestore.SourceLocal
+			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or RopeRestore.TargetLocal
 
-			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, false, self, Target )
+			Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true, self, Target )
 		else
 			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
 		end
@@ -1163,20 +1167,49 @@ function ENT:PreEntityCopy()
 
 	local info = {}
 	local entids = {}
+	local linkData = {}
 
-	-- Store only the linked entity IDs. Parent entities and endpoint offsets
-	-- are runtime transforms and must be resolved from the freshly pasted
-	-- entities, not serialized as EntIndex-based parent data. This also
-	-- normalizes links from pre-scaling dupes when they are copied again.
-	for Key, Link in pairs( self.WheelLink ) do
-		if not IsValid( Link.Ent ) then
-			table.remove( self.WheelLink, Key )
-		else
-			table.insert( entids, Link.Ent:EntIndex() )
+	local function SaveEndpoint( Entity, LocalPos )
+		local Parent = Entity:GetParent()
+		local WorldPos = Entity:LocalToWorld( LocalPos )
+
+		if IsValid( Parent ) then
+			return Parent:EntIndex(), Parent:WorldToLocal( WorldPos ), LocalPos
 		end
+
+		return nil, LocalPos, LocalPos
+	end
+
+	for Key, Link in pairs( self.WheelLink ) do
+		local Target = Link.Ent
+		if not IsValid( Target ) then
+			table.remove( self.WheelLink, Key )
+			continue
+		end
+
+		-- Recalculate the live attachment side after a resize. Link.Output
+		-- may still contain the previous model's attachment vector.
+		local TargetIn = Target.IsGeartrain and Target.In or vector_origin
+		local TargetWorld = Target:LocalToWorld( TargetIn )
+		local Side = self:WorldToLocal( TargetWorld ).y < 0 and 0 or 1
+		local SourceOut = Side == 0 and self.OutL or self.OutR
+		local SourceParentID, SourceOffset, SourceLocal = SaveEndpoint( self, SourceOut )
+		local TargetParentID, TargetOffset, TargetLocal = SaveEndpoint( Target, TargetIn )
+		local TargetID = Target:EntIndex()
+
+		table.insert( entids, TargetID )
+		linkData[ TargetID ] = {
+			SourceParentID = SourceParentID,
+			SourceOffset = SourceOffset,
+			SourceLocal = SourceLocal,
+			TargetParentID = TargetParentID,
+			TargetOffset = TargetOffset,
+			TargetLocal = TargetLocal,
+		}
 	end
 
 	info.entities = entids
+	info.links = linkData
 	duplicator.StoreEntityModifier( self, "WheelLink", info )
 
 	self.BaseClass.PreEntityCopy( self )
@@ -1192,11 +1225,22 @@ function ENT:PostEntityPaste( Player, Ent, CreatedEntities )
 	if WheelLink and WheelLink.entities then
 		for _, ID in ipairs( WheelLink.entities ) do
 			local Linked = CreatedEntities[ ID ]
-			if IsValid( Linked ) then
-				-- Recompute the rope from the current pasted entity/parent
-				-- transforms. Do not use parent EntIndex/offset snapshots.
-				self:Link( Linked )
+			if not IsValid( Linked ) then continue end
+
+			local Saved = WheelLink.links and WheelLink.links[ ID ]
+			local Restore
+			if Saved then
+				Restore = {
+					SourceParent = Saved.SourceParentID and CreatedEntities[ Saved.SourceParentID ],
+					SourceOffset = Saved.SourceOffset,
+					SourceLocal = Saved.SourceLocal,
+					TargetParent = Saved.TargetParentID and CreatedEntities[ Saved.TargetParentID ],
+					TargetOffset = Saved.TargetOffset,
+					TargetLocal = Saved.TargetLocal,
+				}
 			end
+
+			self:Link( Linked, Restore )
 		end
 
 		Mods.WheelLink = nil
