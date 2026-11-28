@@ -611,47 +611,13 @@ end
 	This one is more simple than the original function.
 	Creates a rope without any constraint
 ------------------------------------------------------------------------]]
-function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, OwnerEnt1, OwnerEnt2 )
-
-	-- keyframe_rope offsets are relative to the endpoint physics objects.
-	-- Callers normally provide entity-local attachment positions; convert
-	-- those through world space and bind to the highest parent when present.
-	-- Restore calls can instead pass already-physics-local offsets directly.
-	local OriginalEnt1, OriginalEnt2 = Ent1, Ent2
-
-	local function ResolveEndpoint( Ent, LocalPos )
-		local WorldPos = Ent:LocalToWorld( LocalPos )
-		local Parent = Ent:GetParent()
-
-		if IsValid( Parent ) then
-			local Root = Parent
-
-			while IsValid( Root:GetParent() ) do
-				Root = Root:GetParent()
-			end
-
-			Ent = Root
-		end
-
-		local Phys = Ent:GetPhysicsObject()
-		if IsValid( Phys ) then
-			return Ent, Phys:WorldToLocal( WorldPos )
-		end
-
-		return Ent, Ent:WorldToLocal( WorldPos )
-	end
-
-	if not ExactEndpoints then
-		Ent1, LPos1 = ResolveEndpoint( Ent1, LPos1 )
-		Ent2, LPos2 = ResolveEndpoint( Ent2, LPos2 )
-	end
+function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2 )
 
 	local rope = ents.Create( "keyframe_rope" )
-	if not IsValid( rope ) then return end
-
 	rope:SetPos( Pos )
 	rope:SetKeyValue( "Width", 1 )
 	rope:SetKeyValue( "Type", 2 )
+
 	rope:SetKeyValue( "RopeMaterial", "cable/cable2" )
 
 	-- Attachment point 1
@@ -667,14 +633,9 @@ function ACE_CreateLinkRope( Pos, Ent1, LPos1, Ent2, LPos2, ExactEndpoints, Owne
 	rope:Spawn()
 	rope:Activate()
 
-	-- Keep cleanup tied to the actual gearbox/prop endpoints.
-	OriginalEnt1 = IsValid( OwnerEnt1 ) and OwnerEnt1 or OriginalEnt1
-	OriginalEnt2 = IsValid( OwnerEnt2 ) and OwnerEnt2 or OriginalEnt2
-
-	OriginalEnt1:DeleteOnRemove( rope )
-	OriginalEnt2:DeleteOnRemove( rope )
-	if Ent1 ~= OriginalEnt1 then Ent1:DeleteOnRemove( rope ) end
-	if Ent2 ~= OriginalEnt2 then Ent2:DeleteOnRemove( rope ) end
+	-- Delete the rope if the attachments get killed
+	Ent1:DeleteOnRemove( rope )
+	Ent2:DeleteOnRemove( rope )
 
 	return rope
 

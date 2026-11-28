@@ -546,6 +546,23 @@ function ENT:Update( ArgsTable )
 				end
 			end
 
+			-- Engines driving this gearbox keep their own ropes.
+			for _, Engine in pairs( self.Master ) do
+				if not IsValid( Engine ) then continue end
+
+				for _, Link in pairs( Engine.GearLink or {} ) do
+					if Link.Ent ~= self then continue end
+
+					local OutWorld = Engine:LocalToWorld( Engine.Out )
+					Link.RopeLen = OutWorld:Distance( self:LocalToWorld( self.In ) )
+
+					if IsValid( Link.Rope ) then
+						Link.Rope:Remove()
+						Link.Rope = ACE_CreateLinkRope( OutWorld, Engine, Engine.Out, self, self.In )
+					end
+				end
+			end
+
 			self.ACE_LinkRefreshPending = false
 		end)
 	end
@@ -1057,7 +1074,7 @@ do
 
 end
 
-function ENT:Link( Target, RopeRestore )
+function ENT:Link( Target )
 
 	if self.ACE_LinkRefreshPending or (IsValid(Target) and Target.ACE_LinkRefreshPending) then
 		return false, "Gearbox attachments are refreshing after a size update; try linking again in a moment!"
@@ -1095,29 +1112,7 @@ function ENT:Link( Target, RopeRestore )
 
 	local Rope = nil
 	if self:CPPIGetOwner():GetInfoNum( "ace_mobility_rope_links", 1) == 1 then
-		if RopeRestore and RopeRestore.PhysicsLocal then
-			-- Versioned dupe data stores offsets in the selected endpoint
-			-- physics object's local space. Prefer the copied root parent,
-			-- falling back to the actual gearbox/target if the parent wasn't
-			-- included in this dupe.
-			local HasSourceParent = IsValid( RopeRestore.SourceParent )
-			local HasTargetParent = IsValid( RopeRestore.TargetParent )
-			local SourceEnt = HasSourceParent and RopeRestore.SourceParent or self
-			local TargetEnt = HasTargetParent and RopeRestore.TargetParent or Target
-			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or RopeRestore.SourceLocal
-			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or RopeRestore.TargetLocal
-
-			if isvector( SourceOffset ) and isvector( TargetOffset ) then
-				Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true, self, Target )
-			else
-				-- Older or incomplete dupe metadata: calculate fresh offsets
-				-- from the live entity-local attachment points.
-				Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos, nil, self, Target )
-			end
-		else
-			-- Normal linking and legacy dupes use entity-local attachment points.
-			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos, nil, self, Target )
-		end
+		Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos )
 	end
 
 	local Phys	= Target:GetPhysicsObject()
@@ -1172,98 +1167,52 @@ end
 
 function ENT:PreEntityCopy()
 
+	-- Link Saving
 	local info = {}
 	local entids = {}
-	local linkData = {}
 
-	local function SaveEndpoint( Entity, LocalPos )
-		local WorldPos = Entity:LocalToWorld( LocalPos )
-		local EntityPhys = Entity:GetPhysicsObject()
-		local EntityOffset = IsValid( EntityPhys ) and EntityPhys:WorldToLocal( WorldPos ) or Entity:WorldToLocal( WorldPos )
-		local Parent = Entity:GetParent()
-
-		if not IsValid( Parent ) then
-			return nil, EntityOffset, EntityOffset
-		end
-
-		-- Resolve to the same highest parent used by ACE_CreateLinkRope.
-		while IsValid( Parent:GetParent() ) do
-			Parent = Parent:GetParent()
-		end
-
-		local ParentPhys = Parent:GetPhysicsObject()
-		local ParentOffset = IsValid( ParentPhys ) and ParentPhys:WorldToLocal( WorldPos ) or Parent:WorldToLocal( WorldPos )
-
-		return Parent:EntIndex(), ParentOffset, EntityOffset
-	end
-
+	-- Clean the table of any invalid entities
 	for Key, Link in pairs( self.WheelLink ) do
-		local Target = Link.Ent
-		if not IsValid( Target ) then
+		if not IsValid( Link.Ent ) then
 			table.remove( self.WheelLink, Key )
-			continue
 		end
-
-		-- Recalculate the live attachment side after a resize. Link.Output
-		-- may still contain the previous model's attachment vector.
-		local TargetIn = Target.IsGeartrain and Target.In or vector_origin
-		local TargetWorld = Target:LocalToWorld( TargetIn )
-		local Side = self:WorldToLocal( TargetWorld ).y < 0 and 0 or 1
-		local SourceOut = Side == 0 and self.OutL or self.OutR
-		local SourceParentID, SourceOffset, SourceLocal = SaveEndpoint( self, SourceOut )
-		local TargetParentID, TargetOffset, TargetLocal = SaveEndpoint( Target, TargetIn )
-		local TargetID = Target:EntIndex()
-
-		table.insert( entids, TargetID )
-		linkData[ TargetID ] = {
-			SourceParentID = SourceParentID,
-			SourceOffset = SourceOffset,
-			SourceLocal = SourceLocal,
-			TargetParentID = TargetParentID,
-			TargetOffset = TargetOffset,
-			TargetLocal = TargetLocal,
-		}
 	end
 
-	info.physicsLocal = true
-	info.entities = entids
-	info.links = linkData
-	duplicator.StoreEntityModifier( self, "WheelLink", info )
+	-- Then save it
+	for _, Link in pairs( self.WheelLink ) do
+		table.insert( entids, Link.Ent:EntIndex() )
+	end
 
+	info.entities = entids
+	if info.entities then
+		duplicator.StoreEntityModifier( self, "WheelLink", info )
+	end
+
+	--Wire dupe info
 	self.BaseClass.PreEntityCopy( self )
 
 end
 
 function ENT:PostEntityPaste( Player, Ent, CreatedEntities )
 
-	self.BaseClass.PostEntityPaste( self, Player, Ent, CreatedEntities )
-
-	local Mods = Ent.EntityMods
-	local WheelLink = Mods and Mods.WheelLink
-	if WheelLink and WheelLink.entities then
-		for _, ID in ipairs( WheelLink.entities ) do
-			local Linked = CreatedEntities[ ID ]
-			if not IsValid( Linked ) then continue end
-
-			local Saved = WheelLink.links and WheelLink.links[ ID ]
-			local Restore
-			if Saved then
-				Restore = {
-					SourceParent = Saved.SourceParentID and CreatedEntities[ Saved.SourceParentID ],
-					SourceOffset = Saved.SourceOffset,
-					SourceLocal = Saved.SourceLocal,
-					TargetParent = Saved.TargetParentID and CreatedEntities[ Saved.TargetParentID ],
-					TargetOffset = Saved.TargetOffset,
-					TargetLocal = Saved.TargetLocal,
-					PhysicsLocal = WheelLink.physicsLocal == true,
-				}
-			end
-
-			self:Link( Linked, Restore )
+	-- Link Pasting
+	if Ent.EntityMods and Ent.EntityMods.WheelLink and Ent.EntityMods.WheelLink.entities then
+		local WheelLink = Ent.EntityMods.WheelLink
+		if WheelLink.entities and next( WheelLink.entities ) then
+			timer.Simple( 0, function() -- this timer is a workaround for an ad2/makespherical issue https://github.com/nrlulz/ACF/issues/14#issuecomment-22844064
+				for _, ID in pairs( WheelLink.entities ) do
+					local Linked = CreatedEntities[ ID ]
+					if IsValid( Linked ) then
+						self:Link( Linked )
+					end
+				end
+			end )
 		end
-
-		Mods.WheelLink = nil
+		Ent.EntityMods.WheelLink = nil
 	end
+
+	--Wire dupe info
+	self.BaseClass.PostEntityPaste( self, Player, Ent, CreatedEntities )
 
 end
 

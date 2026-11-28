@@ -43,16 +43,14 @@ local function UpdateGearboxScale( Gearbox )
 	-- Otherwise the old RenderMultiply matrix and custom client collision remain.
 	if Scale == 1 then
 		if Gearbox.ACE_AppliedScale or Gearbox.ACE_AppliedModel then
-			Gearbox:PhysicsInit( SOLID_VPHYSICS )
-			Gearbox:SetMoveType( MOVETYPE_VPHYSICS )
-			Gearbox:SetSolid( SOLID_VPHYSICS )
+			-- Stock gearboxes have no client physics object.
+			Gearbox:PhysicsDestroy()
 			Gearbox:EnableCustomCollisions( false )
 			Gearbox:DisableMatrix( "RenderMultiply" )
 
 			local Mins, Maxs = Gearbox:GetModelBounds()
 			Gearbox:SetRenderBounds( Mins, Maxs )
 			Gearbox:DrawShadow( true )
-			SyncGearboxPhysics( Gearbox )
 
 			Gearbox.ACE_AppliedScale = nil
 			Gearbox.ACE_AppliedModel = nil
@@ -99,6 +97,14 @@ function ENT:Think()
 	local Result = self.BaseClass.Think( self )
 
 	UpdateGearboxScale( self )
+
+	-- Link ropes anchored here appear to follow the client physics object, and
+	-- CalcAbsolutePosition alone does not keep it moving (parented gearboxes).
+	if self.ACE_AppliedScale then
+		SyncGearboxPhysics( self )
+		self:SetNextClientThink( CurTime() )
+		return true
+	end
 
 	return Result
 end
