@@ -1095,10 +1095,29 @@ function ENT:Link( Target, RopeRestore )
 
 	local Rope = nil
 	if self:CPPIGetOwner():GetInfoNum( "ace_mobility_rope_links", 1) == 1 then
-		-- Bind the visual directly to the gearbox and linked component.
-		-- ACE_CreateLinkRope converts these entity-local points to each
-		-- endpoint's own physics-object space.
-		Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos, true, self, Target )
+		if RopeRestore and RopeRestore.PhysicsLocal then
+			-- Versioned dupe data stores offsets in the selected endpoint
+			-- physics object's local space. Prefer the copied root parent,
+			-- falling back to the actual gearbox/target if the parent wasn't
+			-- included in this dupe.
+			local HasSourceParent = IsValid( RopeRestore.SourceParent )
+			local HasTargetParent = IsValid( RopeRestore.TargetParent )
+			local SourceEnt = HasSourceParent and RopeRestore.SourceParent or self
+			local TargetEnt = HasTargetParent and RopeRestore.TargetParent or Target
+			local SourceOffset = HasSourceParent and RopeRestore.SourceOffset or RopeRestore.SourceLocal
+			local TargetOffset = HasTargetParent and RopeRestore.TargetOffset or RopeRestore.TargetLocal
+
+			if isvector( SourceOffset ) and isvector( TargetOffset ) then
+				Rope = ACE_CreateLinkRope( OutPosWorld, SourceEnt, SourceOffset, TargetEnt, TargetOffset, true, self, Target )
+			else
+				-- Older or incomplete dupe metadata: calculate fresh offsets
+				-- from the live entity-local attachment points.
+				Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos, nil, self, Target )
+			end
+		else
+			-- Normal linking and legacy dupes use entity-local attachment points.
+			Rope = ACE_CreateLinkRope( OutPosWorld, self, OutPos, Target, InPos, nil, self, Target )
+		end
 	end
 
 	local Phys	= Target:GetPhysicsObject()
@@ -1158,21 +1177,24 @@ function ENT:PreEntityCopy()
 	local linkData = {}
 
 	local function SaveEndpoint( Entity, LocalPos )
-		local Parent = Entity:GetParent()
 		local WorldPos = Entity:LocalToWorld( LocalPos )
+		local EntityPhys = Entity:GetPhysicsObject()
+		local EntityOffset = IsValid( EntityPhys ) and EntityPhys:WorldToLocal( WorldPos ) or Entity:WorldToLocal( WorldPos )
+		local Parent = Entity:GetParent()
 
 		if not IsValid( Parent ) then
-			return nil, LocalPos, LocalPos
+			return nil, EntityOffset, EntityOffset
 		end
 
-		-- Match ACE_CreateLinkRope: keyframe_rope endpoints on parented
-		-- entities must be anchored to the highest parent, not an
-		-- intermediate entity in a nested parent chain.
+		-- Resolve to the same highest parent used by ACE_CreateLinkRope.
 		while IsValid( Parent:GetParent() ) do
 			Parent = Parent:GetParent()
 		end
 
-		return Parent:EntIndex(), Parent:WorldToLocal( WorldPos ), LocalPos
+		local ParentPhys = Parent:GetPhysicsObject()
+		local ParentOffset = IsValid( ParentPhys ) and ParentPhys:WorldToLocal( WorldPos ) or Parent:WorldToLocal( WorldPos )
+
+		return Parent:EntIndex(), ParentOffset, EntityOffset
 	end
 
 	for Key, Link in pairs( self.WheelLink ) do
@@ -1203,6 +1225,7 @@ function ENT:PreEntityCopy()
 		}
 	end
 
+	info.physicsLocal = true
 	info.entities = entids
 	info.links = linkData
 	duplicator.StoreEntityModifier( self, "WheelLink", info )
@@ -1232,6 +1255,7 @@ function ENT:PostEntityPaste( Player, Ent, CreatedEntities )
 					TargetParent = Saved.TargetParentID and CreatedEntities[ Saved.TargetParentID ],
 					TargetOffset = Saved.TargetOffset,
 					TargetLocal = Saved.TargetLocal,
+					PhysicsLocal = WheelLink.physicsLocal == true,
 				}
 			end
 
